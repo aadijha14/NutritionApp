@@ -1,0 +1,32 @@
+{
+  "slots": [
+    {
+      "id": "breakfast",
+      "name": "Breakfast",
+      "startTime": "00:00",
+      "endTime": "23:59",
+      "defaultTime": "08:30"
+    },
+    {
+      "id": "lunch",
+      "name": "Lunch",
+      "startTime": "00:00",
+      "endTime": "23:59",
+      "defaultTime": "12:30"
+    },
+    {
+      "id": "snack",
+      "name": "Snack",
+      "startTime": "00:00",
+      "endTime": "23:59",
+      "defaultTime": "16:00"
+    },
+    {
+      "id": "dinner",
+      "name": "Dinner",
+      "startTime": "00:00",
+      "endTime": "23:59",
+      "defaultTime": "19:00"
+    }
+  ]
+}
