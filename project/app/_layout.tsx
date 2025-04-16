@@ -1,11 +1,12 @@
+// app/(app)/styles/_layout.tsx
+
 import { useEffect, useState, useContext } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useFrameworkReady } from '@/hooks/useFrameworkReady';
-import { ThemeProvider } from '../context/ThemeContext';
 import { View, StyleSheet, TouchableOpacity, Text, Platform } from 'react-native';
 import { router, usePathname } from 'expo-router';
 import { Search, Plus, ChartPie as PieChart, Clock, Settings } from 'lucide-react-native';
+import { ThemeProvider } from '../context/ThemeContext';
 import { ThemeContext } from '../context/ThemeContext';
 
 function TabBar() {
@@ -13,6 +14,10 @@ function TabBar() {
   const isDark = theme === 'dark';
   const pathname = usePathname();
 
+  // Debug log to see the actual pathname
+  console.log('Current pathname:', pathname);
+
+  // Decide if a tab is "active"
   const isActive = (route: string) => {
     if (route === 'dashboard' && pathname === '/(app)/dashboard') return true;
     if (route === 'search' && pathname === '/(app)/nearby-restaurants') return true;
@@ -21,6 +26,7 @@ function TabBar() {
     return false;
   };
 
+  // Navigation helper
   const navigateTo = (route: string) => {
     switch (route) {
       case 'dashboard':
@@ -41,82 +47,84 @@ function TabBar() {
     }
   };
 
-  // Don't show tab bar on auth screens
-  if (pathname.startsWith('/(auth)')) {
+  // Hide tab bar on auth routes
+  if (
+    pathname === '/' ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/signup') ||
+    pathname.startsWith('/forgot-password') ||
+    pathname.startsWith('/otp-verification') ||
+    pathname.startsWith('/password-reset') ||
+    pathname.startsWith('/account-created') ||
+    pathname.startsWith('/profile-management')
+  ) {
     return null;
   }
 
   return (
     <View style={[styles.tabBar, isDark && styles.tabBarDark]}>
-      <TouchableOpacity 
-        style={styles.tab}
-        onPress={() => navigateTo('dashboard')}
-      >
-        <PieChart 
-          color={isActive('dashboard') ? "#2ecc71" : isDark ? "#aaa" : "#888"} 
-          size={24} 
+      <TouchableOpacity style={styles.tab} onPress={() => navigateTo('dashboard')}>
+        <PieChart
+          color={isActive('dashboard') ? '#2ecc71' : isDark ? '#aaa' : '#888'}
+          size={24}
         />
-        <Text 
-          style={isActive('dashboard') ? 
-            styles.tabText : 
-            [styles.inactiveTabText, isDark && styles.inactiveTabTextDark]
+        <Text
+          style={
+            isActive('dashboard')
+              ? styles.tabText
+              : [styles.inactiveTabText, isDark && styles.inactiveTabTextDark]
           }
         >
           Dashboard
         </Text>
       </TouchableOpacity>
-      <TouchableOpacity 
-        style={styles.tab}
-        onPress={() => navigateTo('search')}
-      >
-        <Search 
-          color={isActive('search') ? "#2ecc71" : isDark ? "#aaa" : "#888"} 
-          size={24} 
+
+      <TouchableOpacity style={styles.tab} onPress={() => navigateTo('search')}>
+        <Search
+          color={isActive('search') ? '#2ecc71' : isDark ? '#aaa' : '#888'}
+          size={24}
         />
-        <Text 
-          style={isActive('search') ? 
-            styles.tabText : 
-            [styles.inactiveTabText, isDark && styles.inactiveTabTextDark]
+        <Text
+          style={
+            isActive('search')
+              ? styles.tabText
+              : [styles.inactiveTabText, isDark && styles.inactiveTabTextDark]
           }
         >
           Search
         </Text>
       </TouchableOpacity>
-      <TouchableOpacity 
-        style={styles.addButton}
-        onPress={() => navigateTo('add')}
-      >
+
+      <TouchableOpacity style={styles.addButton} onPress={() => navigateTo('add')}>
         <Plus color="#fff" size={24} />
       </TouchableOpacity>
-      <TouchableOpacity 
-        style={styles.tab}
-        onPress={() => navigateTo('history')}
-      >
-        <Clock 
-          color={isActive('history') ? "#2ecc71" : isDark ? "#aaa" : "#888"} 
-          size={24} 
+
+      <TouchableOpacity style={styles.tab} onPress={() => navigateTo('history')}>
+        <Clock
+          color={isActive('history') ? '#2ecc71' : isDark ? '#aaa' : '#888'}
+          size={24}
         />
-        <Text 
-          style={isActive('history') ? 
-            styles.tabText : 
-            [styles.inactiveTabText, isDark && styles.inactiveTabTextDark]
+        <Text
+          style={
+            isActive('history')
+              ? styles.tabText
+              : [styles.inactiveTabText, isDark && styles.inactiveTabTextDark]
           }
         >
           History
         </Text>
       </TouchableOpacity>
-      <TouchableOpacity 
-        style={styles.tab}
-        onPress={() => navigateTo('profile')}
-      >
-        <Settings 
-          color={isActive('profile') ? "#2ecc71" : isDark ? "#aaa" : "#888"} 
-          size={24} 
+
+      <TouchableOpacity style={styles.tab} onPress={() => navigateTo('profile')}>
+        <Settings
+          color={isActive('profile') ? '#2ecc71' : isDark ? '#aaa' : '#888'}
+          size={24}
         />
-        <Text 
-          style={isActive('profile') ? 
-            styles.tabText : 
-            [styles.inactiveTabText, isDark && styles.inactiveTabTextDark]
+        <Text
+          style={
+            isActive('profile')
+              ? styles.tabText
+              : [styles.inactiveTabText, isDark && styles.inactiveTabTextDark]
           }
         >
           Profile
@@ -127,9 +135,6 @@ function TabBar() {
 }
 
 export default function RootLayout() {
-  useFrameworkReady();
-  const { useContext } = require('react');
-
   return (
     <ThemeProvider>
       <>
@@ -145,6 +150,7 @@ export default function RootLayout() {
   );
 }
 
+// Styles
 const styles = StyleSheet.create({
   tabBar: {
     position: 'absolute',

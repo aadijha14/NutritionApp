@@ -62,8 +62,10 @@ interface UserData {
   dailyCalorieTarget?: number;
 }
 
-// Use a width that allows space for labels
-const screenWidth = Dimensions.get('window').width - 40;
+type DateRangeType = 'week' | 'month' | '3months' | 'year';
+
+// Slightly reduce the width for chart alignment
+const screenWidth = Dimensions.get('window').width - 50;
 
 const DiningAnalyticsScreen: React.FC = () => {
   const { theme } = useContext(ThemeContext);
@@ -72,15 +74,17 @@ const DiningAnalyticsScreen: React.FC = () => {
   const [mealHistory, setMealHistory] = useState<MealLog[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [dateRange, setDateRange] = useState<'week' | 'month' | 'year'>('week');
+
+  // Include '3months' in date range
+  const [dateRange, setDateRange] = useState<DateRangeType>('week');
   const [showDateRangeDropdown, setShowDateRangeDropdown] = useState<boolean>(false);
+
   const [dailyData, setDailyData] = useState<DailyNutrition[]>([]);
   const [weeklyData, setWeeklyData] = useState<WeeklyNutrition[]>([]);
   const [activeMetric, setActiveMetric] = useState<'calories' | 'protein' | 'carbs' | 'fat'>('calories');
   const [userData, setUserData] = useState<UserData | null>(null);
   const [insights, setInsights] = useState<string[]>([]);
 
-  // Chart config with theme support
   const chartConfig = {
     backgroundColor: isDark ? '#1e1e1e' : '#ffffff',
     backgroundGradientFrom: isDark ? '#1e1e1e' : '#ffffff',
@@ -124,7 +128,7 @@ const DiningAnalyticsScreen: React.FC = () => {
     setError(null);
 
     try {
-      // Fetch user's meal logs
+      // Fetch user’s meal logs for last year
       const now = new Date();
       const oneYearAgo = new Date(now);
       oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
@@ -138,11 +142,11 @@ const DiningAnalyticsScreen: React.FC = () => {
 
       const snapshot = await getDocs(mealsQuery);
       const meals: MealLog[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
+      snapshot.forEach((docSnapshot) => {
+        const data = docSnapshot.data();
         const mealDate = data.date?.toDate ? data.date.toDate() : new Date(data.date);
         meals.push({
-          id: doc.id,
+          id: docSnapshot.id,
           foodName: data.foodName || '',
           calories: data.calories || 0,
           protein: data.protein || 0,
@@ -156,13 +160,13 @@ const DiningAnalyticsScreen: React.FC = () => {
       
       setMealHistory(meals);
       
-      // Fetch user data for goals
+      // Fetch user data (like dailyCalorieTarget)
       const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
       if (userDoc.exists()) {
         setUserData(userDoc.data() as UserData);
       }
-    } catch (error) {
-      console.error('Error fetching meal data:', error);
+    } catch (err) {
+      console.error('Error fetching meal data:', err);
       setError('Failed to fetch data. Please try again.');
     } finally {
       setLoading(false);
@@ -172,19 +176,26 @@ const DiningAnalyticsScreen: React.FC = () => {
   const processMealData = () => {
     const now = new Date();
     let startDate: Date;
+
+    // Adjust logic for '3months'
     if (dateRange === 'week') {
       startDate = new Date(now);
       startDate.setDate(startDate.getDate() - 7);
     } else if (dateRange === 'month') {
       startDate = new Date(now);
       startDate.setMonth(startDate.getMonth() - 1);
+    } else if (dateRange === '3months') {
+      startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 3);
     } else {
+      // year
       startDate = new Date(now);
       startDate.setFullYear(startDate.getFullYear() - 1);
     }
-    
+
     const filteredMeals = mealHistory.filter(meal => meal.date >= startDate);
     const dailyMap = new Map<string, DailyNutrition>();
+
     filteredMeals.forEach(meal => {
       const dateStr = meal.date.toISOString().split('T')[0];
       if (!dailyMap.has(dateStr)) {
@@ -204,9 +215,11 @@ const DiningAnalyticsScreen: React.FC = () => {
       day.fat += meal.fat;
       day.mealCount += 1;
     });
+
     const sortedDailyData = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
     setDailyData(sortedDailyData);
-    
+
+    // For 'year', also compute weekly data
     if (dateRange === 'year') {
       const weeklyMap = new Map<string, WeeklyNutrition>();
       filteredMeals.forEach(meal => {
@@ -234,62 +247,78 @@ const DiningAnalyticsScreen: React.FC = () => {
       const sortedWeeklyData = Array.from(weeklyMap.values()).sort((a, b) => a.week.localeCompare(b.week));
       setWeeklyData(sortedWeeklyData);
     }
-    
+
     generateInsights(filteredMeals, dailyMap);
   };
 
   const generateInsights = (meals: MealLog[], dailyData: Map<string, DailyNutrition>) => {
-    const insights: string[] = [];
+    const generatedInsights: string[] = [];
+
     if (meals.length === 0) {
-      insights.push("No meal data available for this period. Start logging your meals to see insights!");
-      setInsights(insights);
+      generatedInsights.push("No meal data available for this period. Start logging your meals to see insights!");
+      setInsights(generatedInsights);
       return;
     }
+
+    // Summaries
     const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
     const totalProtein = meals.reduce((sum, meal) => sum + meal.protein, 0);
     const totalCarbs = meals.reduce((sum, meal) => sum + meal.carbs, 0);
     const totalFat = meals.reduce((sum, meal) => sum + meal.fat, 0);
+
     const avgCaloriesPerDay = totalCalories / dailyData.size;
     const avgProteinPerDay = totalProtein / dailyData.size;
     const avgCarbsPerDay = totalCarbs / dailyData.size;
     const avgFatPerDay = totalFat / dailyData.size;
-    
+
+    // If user set a daily calorie target
     if (userData?.dailyCalorieTarget) {
       const targetCalories = userData.dailyCalorieTarget;
       const percentOfTarget = Math.round((avgCaloriesPerDay / targetCalories) * 100);
       if (percentOfTarget < 80) {
-        insights.push(`Your daily calorie intake (${Math.round(avgCaloriesPerDay)} cal) is ${100 - percentOfTarget}% below your target of ${targetCalories} cal.`);
+        generatedInsights.push(`Your daily calorie intake (${Math.round(avgCaloriesPerDay)} cal) is ${100 - percentOfTarget}% below your target of ${targetCalories} cal.`);
       } else if (percentOfTarget > 120) {
-        insights.push(`Your daily calorie intake (${Math.round(avgCaloriesPerDay)} cal) is ${percentOfTarget - 100}% above your target of ${targetCalories} cal.`);
+        generatedInsights.push(`Your daily calorie intake (${Math.round(avgCaloriesPerDay)} cal) is ${percentOfTarget - 100}% above your target of ${targetCalories} cal.`);
       } else {
-        insights.push(`Your daily calorie intake (${Math.round(avgCaloriesPerDay)} cal) is close to your target of ${targetCalories} cal.`);
+        generatedInsights.push(`Your daily calorie intake (${Math.round(avgCaloriesPerDay)} cal) is close to your target of ${targetCalories} cal.`);
       }
     } else {
-      insights.push(`Your average daily calorie intake is ${Math.round(avgCaloriesPerDay)} cal.`);
+      generatedInsights.push(`Your average daily calorie intake is ${Math.round(avgCaloriesPerDay)} cal.`);
     }
-    
+
+    // Macro distribution
     const totalMacroCalories = (avgProteinPerDay * 4) + (avgCarbsPerDay * 4) + (avgFatPerDay * 9);
-    const proteinPercentage = Math.round((avgProteinPerDay * 4 / totalMacroCalories) * 100);
-    const carbsPercentage = Math.round((avgCarbsPerDay * 4 / totalMacroCalories) * 100);
-    const fatPercentage = Math.round((avgFatPerDay * 9 / totalMacroCalories) * 100);
-    insights.push(`Your macro distribution is approximately ${proteinPercentage}% protein, ${carbsPercentage}% carbs, and ${fatPercentage}% fat.`);
-    
+    if (totalMacroCalories > 0) {
+      const proteinPercentage = Math.round((avgProteinPerDay * 4 / totalMacroCalories) * 100);
+      const carbsPercentage = Math.round((avgCarbsPerDay * 4 / totalMacroCalories) * 100);
+      const fatPercentage = Math.round((avgFatPerDay * 9 / totalMacroCalories) * 100);
+      generatedInsights.push(`Your macro distribution is approximately ${proteinPercentage}% protein, ${carbsPercentage}% carbs, and ${fatPercentage}% fat.`);
+    }
+
+    // Meal type stats
     const breakfastCount = meals.filter(meal => meal.mealType === 'breakfast').length;
     const lunchCount = meals.filter(meal => meal.mealType === 'lunch').length;
     const dinnerCount = meals.filter(meal => meal.mealType === 'dinner').length;
     const snackCount = meals.filter(meal => meal.mealType === 'snack').length;
     const skipBreakfastRate = Math.round((1 - breakfastCount / dailyData.size) * 100);
+
     if (skipBreakfastRate > 50) {
-      insights.push(`You skipped breakfast on ${skipBreakfastRate}% of days. Consider adding a nutritious breakfast to your routine.`);
+      generatedInsights.push(`You skipped breakfast on ${skipBreakfastRate}% of days. Consider adding a nutritious breakfast to your routine.`);
     }
     if (snackCount > (breakfastCount + lunchCount + dinnerCount) / 2) {
-      insights.push("You log snacks more frequently than regular meals. Try to focus on balanced main meals.");
+      generatedInsights.push("You log snacks more frequently than regular meals. Try to focus on balanced main meals.");
     }
+
+    // Restaurant vs home
     const restaurantCount = meals.filter(meal => meal.location?.type === 'restaurant').length;
-    const homeCount = meals.filter(meal => meal.location?.type === 'custom').length;
     const restaurantPercentage = Math.round((restaurantCount / meals.length) * 100);
-    insights.push(`${restaurantPercentage}% of your meals were at restaurants. ${restaurantPercentage > 50 ? "Consider preparing more meals at home for better nutritional control." : "Good job balancing restaurant meals with home cooking!"}`);
-    setInsights(insights);
+    generatedInsights.push(`${restaurantPercentage}% of your meals were at restaurants. ${
+      restaurantPercentage > 50 
+        ? "Consider preparing more meals at home for better nutritional control." 
+        : "Good job balancing restaurant meals with home cooking!"
+    }`);
+
+    setInsights(generatedInsights);
   };
 
   const formatDateLabel = (dateString: string) => {
@@ -315,21 +344,52 @@ const DiningAnalyticsScreen: React.FC = () => {
     };
   };
 
+  const filterMealsByDateRange = () => {
+    const now = new Date();
+    let startDate: Date;
+    if (dateRange === 'week') {
+      startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - 7);
+    } else if (dateRange === 'month') {
+      startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 1);
+    } else if (dateRange === '3months') {
+      startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 3);
+    } else {
+      // year
+      startDate = new Date(now);
+      startDate.setFullYear(startDate.getFullYear() - 1);
+    }
+    return mealHistory.filter(meal => meal.date >= startDate);
+  };
+
+  // Drop-down with higher zIndex to fix behind-component issue
   const renderDateRangeSelector = () => (
-    <View style={styles.dateRangeContainer}>
+    <View style={[styles.dateRangeContainer]}>
       <TouchableOpacity 
         style={[styles.dateRangeSelector, isDark && styles.dateRangeSelectorDark]}
         onPress={() => setShowDateRangeDropdown(!showDateRangeDropdown)}
       >
         <Text style={[styles.dateRangeText, isDark && styles.textLight]}>
-          {dateRange === 'week' ? 'Last 7 Days' : 
-           dateRange === 'month' ? 'Last 30 Days' : 'Last 12 Months'}
+          {dateRange === 'week'
+            ? 'Last 7 Days'
+            : dateRange === 'month'
+            ? 'Last 30 Days'
+            : dateRange === '3months'
+            ? 'Last 3 Months'
+            : 'Last 12 Months'
+          }
         </Text>
         <ChevronDown size={16} color={isDark ? "#f2f2f2" : "#666"} />
       </TouchableOpacity>
-      
+
       {showDateRangeDropdown && (
-        <View style={[styles.dateRangeDropdown, isDark && styles.dateRangeDropdownDark]}>
+        <View style={[
+          styles.dateRangeDropdown,
+          isDark && styles.dateRangeDropdownDark
+        ]}>
+          {/* 7 Days */}
           <TouchableOpacity 
             style={styles.dateRangeOption}
             onPress={() => {
@@ -337,12 +397,18 @@ const DiningAnalyticsScreen: React.FC = () => {
               setShowDateRangeDropdown(false);
             }}
           >
-            <Text style={dateRange === 'week' 
-                ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark] 
-                : [styles.optionText, isDark && styles.optionTextDark]}>
+            <Text
+              style={
+                dateRange === 'week'
+                  ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark]
+                  : [styles.optionText, isDark && styles.optionTextDark]
+              }
+            >
               Last 7 Days
             </Text>
           </TouchableOpacity>
+
+          {/* 1 Month */}
           <TouchableOpacity 
             style={styles.dateRangeOption}
             onPress={() => {
@@ -350,12 +416,37 @@ const DiningAnalyticsScreen: React.FC = () => {
               setShowDateRangeDropdown(false);
             }}
           >
-            <Text style={dateRange === 'month' 
-                ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark] 
-                : [styles.optionText, isDark && styles.optionTextDark]}>
+            <Text
+              style={
+                dateRange === 'month'
+                  ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark]
+                  : [styles.optionText, isDark && styles.optionTextDark]
+              }
+            >
               Last 30 Days
             </Text>
           </TouchableOpacity>
+
+          {/* 3 Months */}
+          <TouchableOpacity 
+            style={styles.dateRangeOption}
+            onPress={() => {
+              setDateRange('3months');
+              setShowDateRangeDropdown(false);
+            }}
+          >
+            <Text
+              style={
+                dateRange === '3months'
+                  ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark]
+                  : [styles.optionText, isDark && styles.optionTextDark]
+              }
+            >
+              Last 3 Months
+            </Text>
+          </TouchableOpacity>
+
+          {/* 1 Year */}
           <TouchableOpacity 
             style={styles.dateRangeOption}
             onPress={() => {
@@ -363,9 +454,13 @@ const DiningAnalyticsScreen: React.FC = () => {
               setShowDateRangeDropdown(false);
             }}
           >
-            <Text style={dateRange === 'year' 
-                ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark] 
-                : [styles.optionText, isDark && styles.optionTextDark]}>
+            <Text
+              style={
+                dateRange === 'year'
+                  ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark]
+                  : [styles.optionText, isDark && styles.optionTextDark]
+              }
+            >
               Last 12 Months
             </Text>
           </TouchableOpacity>
@@ -380,11 +475,13 @@ const DiningAnalyticsScreen: React.FC = () => {
         style={[styles.metricButton, activeMetric === 'calories' && styles.activeMetricButton]}
         onPress={() => setActiveMetric('calories')}
       >
-        <Text style={[
-          styles.metricText, 
-          isDark && styles.metricTextDark,
-          activeMetric === 'calories' && styles.activeMetricText
-        ]}>
+        <Text
+          style={[
+            styles.metricText, 
+            isDark && styles.metricTextDark,
+            activeMetric === 'calories' && styles.activeMetricText
+          ]}
+        >
           Calories
         </Text>
       </TouchableOpacity>
@@ -392,11 +489,13 @@ const DiningAnalyticsScreen: React.FC = () => {
         style={[styles.metricButton, activeMetric === 'protein' && styles.activeMetricButton]}
         onPress={() => setActiveMetric('protein')}
       >
-        <Text style={[
-          styles.metricText, 
-          isDark && styles.metricTextDark,
-          activeMetric === 'protein' && styles.activeMetricText
-        ]}>
+        <Text
+          style={[
+            styles.metricText, 
+            isDark && styles.metricTextDark,
+            activeMetric === 'protein' && styles.activeMetricText
+          ]}
+        >
           Protein
         </Text>
       </TouchableOpacity>
@@ -404,11 +503,13 @@ const DiningAnalyticsScreen: React.FC = () => {
         style={[styles.metricButton, activeMetric === 'carbs' && styles.activeMetricButton]}
         onPress={() => setActiveMetric('carbs')}
       >
-        <Text style={[
-          styles.metricText, 
-          isDark && styles.metricTextDark,
-          activeMetric === 'carbs' && styles.activeMetricText
-        ]}>
+        <Text
+          style={[
+            styles.metricText, 
+            isDark && styles.metricTextDark,
+            activeMetric === 'carbs' && styles.activeMetricText
+          ]}
+        >
           Carbs
         </Text>
       </TouchableOpacity>
@@ -416,11 +517,13 @@ const DiningAnalyticsScreen: React.FC = () => {
         style={[styles.metricButton, activeMetric === 'fat' && styles.activeMetricButton]}
         onPress={() => setActiveMetric('fat')}
       >
-        <Text style={[
-          styles.metricText, 
-          isDark && styles.metricTextDark,
-          activeMetric === 'fat' && styles.activeMetricText
-        ]}>
+        <Text
+          style={[
+            styles.metricText, 
+            isDark && styles.metricTextDark,
+            activeMetric === 'fat' && styles.activeMetricText
+          ]}
+        >
           Fat
         </Text>
       </TouchableOpacity>
@@ -431,23 +534,41 @@ const DiningAnalyticsScreen: React.FC = () => {
     const avg = getAverageNutrition();
     return (
       <View style={[styles.avgNutritionCard, isDark && styles.cardDark]}>
-        <Text style={[styles.cardTitle, isDark && styles.cardTitleDark]}>Daily Average</Text>
+        <Text style={[styles.cardTitle, isDark && styles.cardTitleDark]}>
+          Daily Average
+        </Text>
         <View style={styles.avgNutritionGrid}>
           <View style={styles.avgNutritionItem}>
-            <Text style={styles.avgNutritionValue}>{avg.calories}</Text>
-            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>Calories</Text>
+            <Text style={styles.avgNutritionValue}>
+              {avg.calories}
+            </Text>
+            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>
+              Calories
+            </Text>
           </View>
           <View style={styles.avgNutritionItem}>
-            <Text style={styles.avgNutritionValue}>{avg.protein}g</Text>
-            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>Protein</Text>
+            <Text style={styles.avgNutritionValue}>
+              {avg.protein}g
+            </Text>
+            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>
+              Protein
+            </Text>
           </View>
           <View style={styles.avgNutritionItem}>
-            <Text style={styles.avgNutritionValue}>{avg.carbs}g</Text>
-            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>Carbs</Text>
+            <Text style={styles.avgNutritionValue}>
+              {avg.carbs}g
+            </Text>
+            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>
+              Carbs
+            </Text>
           </View>
           <View style={styles.avgNutritionItem}>
-            <Text style={styles.avgNutritionValue}>{avg.fat}g</Text>
-            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>Fat</Text>
+            <Text style={styles.avgNutritionValue}>
+              {avg.fat}g
+            </Text>
+            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>
+              Fat
+            </Text>
           </View>
         </View>
       </View>
@@ -456,6 +577,7 @@ const DiningAnalyticsScreen: React.FC = () => {
 
   const renderTrendChart = () => {
     if (dateRange === 'year' && weeklyData.length > 0) {
+      // Weekly chart for the last year
       const metricData = weeklyData.map(week => week[activeMetric]);
       const labels = weeklyData.map((week, index) => 
         index % Math.ceil(weeklyData.length / 5) === 0 ? week.week.split('-')[1].replace('W', '') : ''
@@ -489,7 +611,9 @@ const DiningAnalyticsScreen: React.FC = () => {
         </View>
       );
     } else if (dailyData.length > 0) {
-      const displayData = dateRange === 'week' ? dailyData.slice(-7) : dailyData.slice(-30);
+      // For week, month, and 3months, use daily data
+      const numberOfDays = dateRange === 'week' ? 7 : dateRange === 'month' ? 30 : 90;
+      const displayData = dailyData.slice(-numberOfDays);
       const metricData = displayData.map(day => day[activeMetric]);
       const labels = displayData.map((day, index) => 
         index % Math.ceil(displayData.length / 5) === 0 ? formatDateLabel(day.date) : ''
@@ -547,6 +671,7 @@ const DiningAnalyticsScreen: React.FC = () => {
     const carbsCalories = avg.carbs * 4;
     const fatCalories = avg.fat * 9;
     const totalCalories = proteinCalories + carbsCalories + fatCalories;
+
     if (totalCalories === 0) {
       return (
         <View style={[styles.emptyChartContainer, isDark && styles.cardDark]}>
@@ -581,7 +706,9 @@ const DiningAnalyticsScreen: React.FC = () => {
     ];
     return (
       <View style={[styles.chartContainer, isDark && styles.cardDark]}>
-        <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>Macro Distribution (Calories)</Text>
+        <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>
+          Macro Distribution (Calories)
+        </Text>
         <PieChart
           data={data}
           width={screenWidth}
@@ -597,28 +724,10 @@ const DiningAnalyticsScreen: React.FC = () => {
   };
 
   const renderMealLocationChart = () => {
-    const meals = dateRange === 'week' ? 
-      mealHistory.filter(meal => {
-        const now = new Date();
-        const weekAgo = new Date(now);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        return meal.date >= weekAgo;
-      }) :
-      dateRange === 'month' ?
-      mealHistory.filter(meal => {
-        const now = new Date();
-        const monthAgo = new Date(now);
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-        return meal.date >= monthAgo;
-      }) :
-      mealHistory.filter(meal => {
-        const now = new Date();
-        const yearAgo = new Date(now);
-        yearAgo.setFullYear(yearAgo.getFullYear() - 1);
-        return meal.date >= yearAgo;
-      });
+    const meals = filterMealsByDateRange();
     const restaurantCount = meals.filter(meal => meal.location?.type === 'restaurant').length;
     const homeCount = meals.filter(meal => meal.location?.type === 'custom').length;
+
     if (meals.length === 0 || (restaurantCount === 0 && homeCount === 0)) {
       return (
         <View style={[styles.emptyChartContainer, isDark && styles.cardDark]}>
@@ -637,7 +746,7 @@ const DiningAnalyticsScreen: React.FC = () => {
         legendFontSize: 12
       },
       {
-        name: 'Home/Custom',
+        name: 'Home',
         value: homeCount,
         color: '#2ecc71',
         legendFontColor: isDark ? '#f2f2f2' : '#333',
@@ -646,7 +755,9 @@ const DiningAnalyticsScreen: React.FC = () => {
     ];
     return (
       <View style={[styles.chartContainer, isDark && styles.cardDark]}>
-        <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>Meal Location Distribution</Text>
+        <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>
+          Meal Location Distribution
+        </Text>
         <PieChart
           data={data}
           width={screenWidth}
@@ -669,31 +780,13 @@ const DiningAnalyticsScreen: React.FC = () => {
   };
 
   const renderMealCountByTypeChart = () => {
-    const meals = dateRange === 'week' ? 
-      mealHistory.filter(meal => {
-        const now = new Date();
-        const weekAgo = new Date(now);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        return meal.date >= weekAgo;
-      }) :
-      dateRange === 'month' ?
-      mealHistory.filter(meal => {
-        const now = new Date();
-        const monthAgo = new Date(now);
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-        return meal.date >= monthAgo;
-      }) :
-      mealHistory.filter(meal => {
-        const now = new Date();
-        const yearAgo = new Date(now);
-        yearAgo.setFullYear(yearAgo.getFullYear() - 1);
-        return meal.date >= yearAgo;
-      });
+    const meals = filterMealsByDateRange();
     const breakfastCount = meals.filter(meal => meal.mealType === 'breakfast').length;
     const lunchCount = meals.filter(meal => meal.mealType === 'lunch').length;
     const dinnerCount = meals.filter(meal => meal.mealType === 'dinner').length;
     const snackCount = meals.filter(meal => meal.mealType === 'snack').length;
     const otherCount = meals.filter(meal => !meal.mealType).length;
+
     if (meals.length === 0) {
       return (
         <View style={[styles.emptyChartContainer, isDark && styles.cardDark]}>
@@ -713,7 +806,9 @@ const DiningAnalyticsScreen: React.FC = () => {
     };
     return (
       <View style={[styles.chartContainer, isDark && styles.cardDark]}>
-        <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>Meal Distribution by Type</Text>
+        <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>
+          Meal Distribution by Type
+        </Text>
         <BarChart
           data={data}
           width={screenWidth}
@@ -741,7 +836,9 @@ const DiningAnalyticsScreen: React.FC = () => {
     }
     return (
       <View style={[styles.insightsContainer, isDark && styles.cardDark]}>
-        <Text style={[styles.insightsTitle, isDark && styles.cardTitleDark]}>Personalized Insights</Text>
+        <Text style={[styles.insightsTitle, isDark && styles.cardTitleDark]}>
+          Personalized Insights
+        </Text>
         {insights.map((insight, index) => (
           <View key={index} style={[styles.insightItem, isDark && styles.insightItemDark]}>
             <Text style={[styles.insightText, isDark && styles.insightTextDark]}>
@@ -762,13 +859,18 @@ const DiningAnalyticsScreen: React.FC = () => {
         >
           <ArrowLeft size={24} color="#2ecc71" />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, isDark && styles.textLight]}>Nutrition Analytics</Text>
+        <Text style={[styles.headerTitle, isDark && styles.textLight]}>
+          Nutrition Analytics
+        </Text>
         {renderDateRangeSelector()}
       </View>
+
       {loading ? (
         <View style={[styles.loadingContainer, isDark && styles.loadingContainerDark]}>
           <ActivityIndicator size="large" color="#2ecc71" />
-          <Text style={[styles.loadingText, isDark && styles.textLight]}>Loading analytics...</Text>
+          <Text style={[styles.loadingText, isDark && styles.textLight]}>
+            Loading analytics...
+          </Text>
         </View>
       ) : error ? (
         <View style={[styles.errorContainer, isDark && styles.errorContainerDark]}>
@@ -782,7 +884,9 @@ const DiningAnalyticsScreen: React.FC = () => {
         </View>
       ) : mealHistory.length === 0 ? (
         <View style={[styles.emptyContainer, isDark && styles.emptyContainerDark]}>
-          <Text style={[styles.emptyText, isDark && styles.textLight]}>No meal data found</Text>
+          <Text style={[styles.emptyText, isDark && styles.textLight]}>
+            No meal data found
+          </Text>
           <TouchableOpacity
             style={styles.addMealButton}
             onPress={() => router.push('/(app)/meal-logging')}
@@ -825,8 +929,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
   },
   contentContainer: {
-    padding: 20,
-    paddingBottom: 90, // Extra padding for tab bar
+    paddingHorizontal: 16,
+    paddingBottom: 90, // extra space for bottom tab bar
   },
   // Header
   header: {
@@ -841,6 +945,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+    // ensure children can appear above other components
+    zIndex: 99,
+    overflow: 'visible',
   },
   headerDark: {
     backgroundColor: '#1e1e1e',
@@ -862,6 +969,7 @@ const styles = StyleSheet.create({
   // Date Range Selector
   dateRangeContainer: {
     position: 'relative',
+    zIndex: 9999, // ensure dropdown above all
   },
   dateRangeSelector: {
     flexDirection: 'row',
@@ -891,8 +999,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 4,
-    zIndex: 1000,
     width: 140,
+    zIndex: 9999,
   },
   dateRangeDropdownDark: {
     backgroundColor: '#1e1e1e',
@@ -915,7 +1023,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   selectedOptionTextDark: {
-    color: '#2ecc71', 
+    color: '#2ecc71',
   },
   // Loading / Error / Empty states
   loadingContainer: {
@@ -936,6 +1044,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+  },
+  errorContainerDark: {
+    backgroundColor: '#121212',
   },
   errorText: {
     color: '#ff6b6b',
@@ -958,6 +1069,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+  },
+  emptyContainerDark: {
+    backgroundColor: '#121212',
   },
   emptyText: {
     color: '#666',
@@ -1076,7 +1190,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   chart: {
+    // Slight left shift to fit labels
     borderRadius: 12,
+    marginLeft: -8,
   },
   emptyChartContainer: {
     backgroundColor: 'white',
@@ -1179,7 +1295,7 @@ const styles = StyleSheet.create({
   },
   // Bottom spacer
   bottomSpacer: {
-    height: 80, // Extra space for the bottom tab bar
+    height: 80, // extra space for the bottom tab bar
   },
 });
 

@@ -5,30 +5,25 @@ import { router } from 'expo-router';
 import globalStyles from '../styles/globalStyles';
 
 const LandingScreen: React.FC = () => {
-  const doDisplayLanding = () => (
-    <>
-      <Text style={globalStyles.title}>Nutrition Tracker</Text>
-      <Text style={globalStyles.subtitle}>
-        Track your meals, monitor your nutrition, and reach your health goals
-      </Text>
-      <Image 
-        source={{ uri: 'https://images.unsplash.com/photo-1490818387583-1baba5e638af?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80' }} 
-        style={styles.image} 
-      />
-    </>
-  );
-
   return (
     <View style={globalStyles.container}>
-      {doDisplayLanding()}
-      <TouchableOpacity 
-        onPress={() => router.push('/(auth)/signup')} 
+      <Image
+        source={require('../../assets/images/MealCareLogo.png')}
+        style={styles.logo}
+        resizeMode="contain"
+      />
+      <Text style={styles.appName}>MealCare</Text>
+      <Text style={styles.tagline}>Caring for You, One Bite at a Time.</Text>
+
+      <TouchableOpacity
+        onPress={() => router.push('/(auth)/signup')}
         style={globalStyles.button}
       >
         <Text style={globalStyles.buttonText}>Sign Up</Text>
       </TouchableOpacity>
-      <TouchableOpacity 
-        onPress={() => router.push('/(auth)/login')} 
+
+      <TouchableOpacity
+        onPress={() => router.push('/(auth)/login')}
         style={[globalStyles.button, styles.loginButton]}
       >
         <Text style={globalStyles.buttonText}>Login</Text>
@@ -38,16 +33,29 @@ const LandingScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  image: {
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-    marginBottom: 24,
-    maxWidth: 350,
+  logo: {
+    width: 300,
+    height: 300,
+    marginBottom: -40,
+  },
+  appName: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  tagline: {
+    fontSize: 16,
+    fontStyle: 'italic',
+    color: '#555',
+    textAlign: 'center',
+    marginBottom: 30,
+    paddingHorizontal: 20,
   },
   loginButton: {
-    backgroundColor: '#1d8348', // Darker green for distinction
-  }
+    backgroundColor: '#1d8348', // Darker green
+  },
 });
 
 export default LandingScreen;

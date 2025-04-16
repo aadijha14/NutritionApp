@@ -3,18 +3,16 @@ import React, { useState, useContext } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Switch, Platform } from 'react-native';
 import {
   Clock,
-  ArrowRightLeft,
   Chrome as Home,
   UtensilsCrossed,
   Bell,
-  Check,
   Pizza,
   MapPin
 } from 'lucide-react-native';
-import { MealSlot } from '../types/mealPlanner';
 import { ThemeContext } from '../context/ThemeContext';
+import { MealSlot } from '../types/mealPlanner';
+import * as Notifications from 'expo-notifications';
 
-// Conditionally import DateTimePicker based on platform
 let DateTimePicker: any;
 if (Platform.OS !== 'web') {
   try {
@@ -30,7 +28,6 @@ interface MealPlanCardProps {
   onToggleLocation: (slotId: string) => void;
   onSwap: (slotId: string) => void;
   onToggleNotify: (slotId: string, notify: boolean) => void;
-  onQuickLog: (slotId: string) => void;
 }
 
 const MealPlanCard: React.FC<MealPlanCardProps> = ({
@@ -38,15 +35,14 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
   onTimeChange,
   onToggleLocation,
   onSwap,
-  onToggleNotify,
-  onQuickLog
+  onToggleNotify
 }) => {
   const { theme } = useContext(ThemeContext);
   const isDark = theme === 'dark';
-  
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  
-  // Convert string time (HH:MM) to Date object safely
+
+  const [showTimePicker, setShowTimePicker] = useState<boolean>(false);
+
+  // Convert "HH:MM" to Date
   const getTimeAsDate = (timeString: string) => {
     if (!timeString) return new Date();
     const parts = timeString.split(':');
@@ -56,117 +52,142 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
     date.setHours(hours, minutes, 0, 0);
     return date;
   };
-  
-  // Handle time change from picker
-  const handleTimeChange = (event: any, selectedDate?: Date) => {
-    setShowTimePicker(Platform.OS === 'ios'); // hide picker on Android after selection
-    
-    if (selectedDate) {
-      const hours = selectedDate.getHours().toString().padStart(2, '0');
-      const minutes = selectedDate.getMinutes().toString().padStart(2, '0');
-      const timeString = `${hours}:${minutes}`;
-      onTimeChange(slot.id, timeString);
-    }
-  };
-  
-  // Format time for display; fallback if time is missing
+
+  // Format "HH:MM" -> "hh:mm AM/PM"
   const formatTimeForDisplay = (time: string) => {
     if (!time) return 'No time set';
-    const parts = time.split(':');
-    if (parts.length < 2) return time;
-    const [hours, minutes] = parts.map(Number);
+    const [hoursStr, minutesStr] = time.split(':');
+    const hours = parseInt(hoursStr, 10);
+    const minutes = parseInt(minutesStr, 10);
     const period = hours >= 12 ? 'PM' : 'AM';
     const displayHours = hours % 12 || 12;
     return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
   };
 
+  // When user picks a time from the OS time picker
+  const handleTimeChange = async (event: any, selectedDate?: Date) => {
+    setShowTimePicker(false); // hide after selection on Android
+    if (selectedDate) {
+      const hours = selectedDate.getHours().toString().padStart(2, '0');
+      const minutes = selectedDate.getMinutes().toString().padStart(2, '0');
+      const timeString = `${hours}:${minutes}`;
+
+      // store in parent's state
+      onTimeChange(slot.id, timeString);
+
+      // If the user has toggled "Remind Me", schedule a local notification
+      if (slot.notify) {
+        // If the time is in the past, schedule for next day
+        let triggerDate = new Date(selectedDate);
+        const now = new Date();
+        if (triggerDate <= now) {
+          triggerDate.setDate(triggerDate.getDate() + 1);
+        }
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: "Meal Reminder",
+            body: `Reminder for your ${slot.name} meal.`,
+          },
+          trigger: triggerDate,
+        });
+      }
+    }
+  };
+
+  // Toggle the notify switch
+  const handleToggleNotify = async (value: boolean) => {
+    onToggleNotify(slot.id, value);
+    if (value && slot.time) {
+      // If user just toggled on, and there's already a time, schedule now
+      const dateObj = getTimeAsDate(slot.time);
+      const now = new Date();
+      if (dateObj <= now) {
+        dateObj.setDate(dateObj.getDate() + 1);
+      }
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "Meal Reminder",
+          body: `Reminder for your ${slot.name} meal.`,
+        },
+        trigger: dateObj,
+      });
+    }
+  };
+
+  // Render the dish name, macros, and restaurant info if any
   const renderMenuItem = () => {
     if (!slot.menuItem) {
       return (
         <View style={[styles.emptyMenuItem, isDark && styles.emptyMenuItemDark]}>
-          <Pizza size={24} color={isDark ? "#555" : "#ccc"} />
+          <Pizza size={24} color={isDark ? '#555' : '#ccc'} />
           <Text style={[styles.emptyMenuItemText, isDark && styles.emptyMenuItemTextDark]}>
             No meal suggestion available
           </Text>
         </View>
       );
     }
-    
     return (
       <View style={[styles.menuItem, isDark && styles.menuItemDark]}>
         <Text style={[styles.menuItemName, isDark && styles.textLight]}>
           {slot.menuItem.foodName || 'No dish available'}
         </Text>
+        {/* If restaurant */}
+        {slot.locationType === 'restaurant' && slot.menuItem.restaurantName ? (
+          <View style={styles.restaurantInfo}>
+            <MapPin size={16} color={isDark ? '#aaa' : '#666'} />
+            <View style={styles.restaurantInfoTextContainer}>
+              <Text style={[styles.restaurantName, isDark && styles.textLight]}>
+                {slot.menuItem.restaurantName}
+              </Text>
+              <Text style={[styles.restaurantAddress, isDark && styles.textLight]}>
+                {slot.menuItem.restaurantAddress}
+              </Text>
+            </View>
+          </View>
+        ) : null}
         <View style={styles.nutritionInfo}>
           <Text style={styles.calorieText}>
-            {slot.menuItem.calories != null ? Math.round(slot.menuItem.calories) : '0'} cal
+            {slot.menuItem.calories != null ? Math.round(slot.menuItem.calories) : 0} cal
           </Text>
           <View style={styles.macros}>
             <Text style={[styles.macroText, isDark && styles.macroTextDark]}>
-              P: {slot.menuItem.protein != null ? Math.round(slot.menuItem.protein) : '0'}g
+              P: {slot.menuItem.protein != null ? Math.round(slot.menuItem.protein) : 0}g
             </Text>
             <Text style={[styles.macroText, isDark && styles.macroTextDark]}>
-              C: {slot.menuItem.carbs != null ? Math.round(slot.menuItem.carbs) : '0'}g
+              C: {slot.menuItem.carbs != null ? Math.round(slot.menuItem.carbs) : 0}g
             </Text>
             <Text style={[styles.macroText, isDark && styles.macroTextDark]}>
-              F: {slot.menuItem.fat != null ? Math.round(slot.menuItem.fat) : '0'}g
+              F: {slot.menuItem.fat != null ? Math.round(slot.menuItem.fat) : 0}g
             </Text>
           </View>
         </View>
-        {slot.menuItem.location?.name && (
-          <View style={styles.locationInfo}>
-            <MapPin size={12} color={isDark ? "#aaa" : "#666"} />
-            <Text style={[styles.locationText, isDark && styles.locationTextDark]}>
-              {slot.menuItem.location.name}
-            </Text>
-          </View>
-        )}
-        {slot.alternatives && slot.alternatives.length > 0 && (
-          <TouchableOpacity 
-            style={[styles.swapButton, isDark && styles.swapButtonDark]} 
-            onPress={() => onSwap(slot.id)}
-          >
-            <ArrowRightLeft size={14} color={isDark ? "#2ecc71" : "#2ecc71"} />
-            <Text style={styles.swapButtonText}>
-              Swap ({slot.alternatives.length})
-            </Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity 
-          style={styles.quickLogButton}
-          onPress={() => onQuickLog(slot.id)}
-        >
-          <Check size={14} color="#fff" />
-          <Text style={styles.quickLogButtonText}>Quick Log</Text>
-        </TouchableOpacity>
       </View>
     );
   };
-  
+
   return (
     <View style={[styles.card, isDark && styles.cardDark]}>
+      {/* Header with meal name and time */}
       <View style={styles.header}>
         <View style={styles.slotInfo}>
           <Text style={[styles.slotName, isDark && styles.textLight]}>
-            {slot.name || 'Meal'}
+            {slot.name}
           </Text>
           <TouchableOpacity 
             style={styles.timeButton}
             onPress={() => setShowTimePicker(true)}
           >
-            <Clock size={14} color={isDark ? "#aaa" : "#666"} />
+            <Clock size={14} color={isDark ? '#aaa' : '#666'} />
             <Text style={[styles.timeText, isDark && styles.timeTextDark]}>
               {formatTimeForDisplay(slot.time)}
             </Text>
           </TouchableOpacity>
         </View>
-        <View style={styles.budgetBadge}>
-          <Text style={styles.budgetText}>
-            Target: {slot.budget != null ? slot.budget : '0'} cal
-          </Text>
-        </View>
+        {/* location type (home or restaurant) toggles in parent's code, 
+            but we show the user's target budget for reference if you like */}
       </View>
-      
+
+      {/* Location toggle row */}
       <View style={[styles.locationToggle, isDark && styles.locationToggleDark]}>
         <TouchableOpacity
           style={[
@@ -176,12 +197,23 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
           ]}
           onPress={() => slot.locationType !== 'home' && onToggleLocation(slot.id)}
         >
-          <Home size={16} color={slot.locationType === 'home' ? (isDark ? '#2ecc71' : '#2ecc71') : (isDark ? '#aaa' : '#888')} />
-          <Text style={[
-            styles.locationOptionText,
-            slot.locationType === 'home' && styles.activeLocationText,
-            isDark && styles.locationOptionTextDark
-          ]}>
+          <Home
+            size={16}
+            color={
+              slot.locationType === 'home'
+                ? '#2ecc71'
+                : isDark
+                ? '#aaa'
+                : '#888'
+            }
+          />
+          <Text
+            style={[
+              styles.locationOptionText,
+              slot.locationType === 'home' && styles.activeLocationText,
+              isDark && styles.locationOptionTextDark
+            ]}
+          >
             Home
           </Text>
         </TouchableOpacity>
@@ -193,34 +225,47 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
           ]}
           onPress={() => slot.locationType !== 'restaurant' && onToggleLocation(slot.id)}
         >
-          <UtensilsCrossed size={16} color={slot.locationType === 'restaurant' ? (isDark ? '#2ecc71' : '#2ecc71') : (isDark ? '#aaa' : '#888')} />
-          <Text style={[
-            styles.locationOptionText,
-            slot.locationType === 'restaurant' && styles.activeLocationText,
-            isDark && styles.locationOptionTextDark
-          ]}>
+          <UtensilsCrossed
+            size={16}
+            color={
+              slot.locationType === 'restaurant'
+                ? '#2ecc71'
+                : isDark
+                ? '#aaa'
+                : '#888'
+            }
+          />
+          <Text
+            style={[
+              styles.locationOptionText,
+              slot.locationType === 'restaurant' && styles.activeLocationText,
+              isDark && styles.locationOptionTextDark
+            ]}
+          >
             Restaurant
           </Text>
         </TouchableOpacity>
       </View>
-      
+
+      {/* Dish info */}
       {renderMenuItem()}
-      
+
+      {/* Footer with "Remind me" toggle */}
       <View style={styles.footer}>
         <View style={styles.notifyContainer}>
-          <Bell size={16} color={isDark ? "#aaa" : "#666"} />
+          <Bell size={16} color={isDark ? '#aaa' : '#666'} />
           <Text style={[styles.notifyText, isDark && styles.notifyTextDark]}>Remind Me</Text>
           <Switch
             value={slot.notify}
-            onValueChange={(value) => onToggleNotify(slot.id, value)}
+            onValueChange={handleToggleNotify}
             trackColor={{ false: isDark ? '#555' : '#ddd', true: '#2ecc7199' }}
             thumbColor={slot.notify ? '#2ecc71' : isDark ? '#888' : '#f4f3f4'}
             ios_backgroundColor={isDark ? '#555' : '#ddd'}
           />
         </View>
       </View>
-      
-      {/* Time Picker Modal for Native Platforms */}
+
+      {/* Show time picker (Platform-specific) */}
       {showTimePicker && Platform.OS !== 'web' && DateTimePicker && (
         <DateTimePicker
           value={getTimeAsDate(slot.time)}
@@ -229,22 +274,38 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
           onChange={handleTimeChange}
         />
       )}
-      
-      {/* Web Time Picker Alternative */}
+
+      {/* Web time picker fallback */}
       {showTimePicker && Platform.OS === 'web' && (
         <View style={[styles.webTimePickerContainer, isDark && styles.webTimePickerContainerDark]}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.webTimePickerCloseButton}
             onPress={() => setShowTimePicker(false)}
           >
             <Text style={styles.webTimePickerCloseText}>Close</Text>
           </TouchableOpacity>
-          <input 
-            type="time" 
+          <input
+            type="time"
             value={slot.time}
-            onChange={(e) => {
-              onTimeChange(slot.id, e.target.value);
+            onChange={async (e) => {
+              const val = e.target.value; // "HH:MM"
+              onTimeChange(slot.id, val);
               setShowTimePicker(false);
+              // If notify is on, schedule
+              if (slot.notify) {
+                let dateObj = getTimeAsDate(val);
+                const now = new Date();
+                if (dateObj <= now) {
+                  dateObj.setDate(dateObj.getDate() + 1);
+                }
+                await Notifications.scheduleNotificationAsync({
+                  content: {
+                    title: "Meal Reminder",
+                    body: `Reminder for your ${slot.name} meal.`,
+                  },
+                  trigger: dateObj,
+                });
+              }
             }}
             style={{
               padding: 10,
@@ -262,6 +323,9 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
   );
 };
 
+//////////////////////////////////////////////////////////////////////////
+// STYLES
+//////////////////////////////////////////////////////////////////////////
 const styles = StyleSheet.create({
   card: {
     backgroundColor: 'white',
@@ -305,19 +369,6 @@ const styles = StyleSheet.create({
   timeTextDark: {
     color: '#aaa',
   },
-  budgetBadge: {
-    backgroundColor: '#f0fff4',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c6f6d5',
-  },
-  budgetText: {
-    fontSize: 12,
-    color: '#2ecc71',
-    fontWeight: 'bold',
-  },
   locationToggle: {
     flexDirection: 'row',
     backgroundColor: '#f5f5f5',
@@ -354,6 +405,21 @@ const styles = StyleSheet.create({
     color: '#2ecc71',
     fontWeight: 'bold',
   },
+  menuItem: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+  },
+  menuItemDark: {
+    backgroundColor: '#252525',
+  },
+  menuItemName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
   emptyMenuItem: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -378,26 +444,27 @@ const styles = StyleSheet.create({
   emptyMenuItemTextDark: {
     color: '#777',
   },
-  menuItem: {
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 16,
+  restaurantInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
-  menuItemDark: {
-    backgroundColor: '#252525',
+  restaurantInfoTextContainer: {
+    marginLeft: 6,
   },
-  menuItemName: {
-    fontSize: 16,
+  restaurantName: {
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 8,
+  },
+  restaurantAddress: {
+    fontSize: 12,
+    color: '#666',
   },
   nutritionInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
   },
   calorieText: {
     fontSize: 16,
@@ -415,55 +482,9 @@ const styles = StyleSheet.create({
   macroTextDark: {
     color: '#aaa',
   },
-  locationInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  locationText: {
-    fontSize: 12,
-    color: '#666',
-    marginLeft: 4,
-  },
-  locationTextDark: {
-    color: '#aaa',
-  },
-  swapButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
-    marginBottom: 8,
-  },
-  swapButtonDark: {
-    backgroundColor: '#2a2a2a',
-  },
-  swapButtonText: {
-    fontSize: 12,
-    color: '#2ecc71',
-    fontWeight: 'bold',
-    marginLeft: 4,
-  },
-  quickLogButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2ecc71',
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  quickLogButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 14,
-    marginLeft: 6,
-  },
   footer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     alignItems: 'center',
   },
   notifyContainer: {
@@ -485,26 +506,29 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 9999,
     padding: 20,
-    zIndex: 1000,
   },
   webTimePickerContainerDark: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
   },
   webTimePickerCloseButton: {
     alignSelf: 'flex-end',
-    marginBottom: 10,
     backgroundColor: '#2ecc71',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 5,
+    marginBottom: 10,
   },
   webTimePickerCloseText: {
-    color: 'white',
+    color: '#fff',
     fontWeight: 'bold',
+  },
+  cardDark: {
+    backgroundColor: '#1e1e1e',
   },
   textLight: {
     color: '#f2f2f2',

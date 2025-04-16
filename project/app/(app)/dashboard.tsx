@@ -16,52 +16,35 @@ import { doc, getDoc, collection, query, where, onSnapshot, orderBy, updateDoc, 
 import { Search, Plus, ChartPie as PieChart, Clock, Settings, Map, UtensilsCrossed, ChartBar as BarChart3, CalendarClock, Check } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
 
-interface UserData {
-  email?: string;
-  name?: string;
-  weight?: number;
-  height?: number;
-  age?: number;
-  sex?: string;
-  activityLevel?: string;
-  tdee?: number;
-  dailyCalorieTarget?: number;
-}
-
-interface MealLog {
-  id: string;
-  foodName: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  date: Date;
-  location?: any;
-  mealType?: string;
-}
-
-interface MealPlanSlot {
+export interface MealPlanSlot {
   id: string;
   name: string;
   time: string;
   menuItem: {
     foodName: string;
     calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
+    protein?: number;
+    carbs?: number;
+    fat?: number;
+    restaurantName?: string;
+    restaurantAddress?: string;
+    location?: {
+      name: string;
+      address?: string;
+    }
   } | null;
   locationType: 'home' | 'restaurant';
+  reason?: string;
 }
 
 const DashboardScreen: React.FC = () => {
   const { theme } = useContext(ThemeContext);
   const isDark = theme === 'dark';
   
-  const [userData, setUserData] = useState<UserData | null>(null);
+  const [userData, setUserData] = useState<any>(null);
   const [totalCalories, setTotalCalories] = useState<number>(0);
   const [caloriesLeft, setCaloriesLeft] = useState<number>(0);
-  const [recentMeals, setRecentMeals] = useState<MealLog[]>([]);
+  const [recentMeals, setRecentMeals] = useState<any[]>([]);
   const [lastResetDate, setLastResetDate] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [totalProtein, setTotalProtein] = useState<number>(0);
@@ -71,30 +54,32 @@ const DashboardScreen: React.FC = () => {
   const [isProteinExceeded, setIsProteinExceeded] = useState<boolean>(false);
   const [isCarbsExceeded, setIsCarbsExceeded] = useState<boolean>(false);
   const [isFatExceeded, setIsFatExceeded] = useState<boolean>(false);
-  const [todaysPlan, setTodaysPlan] = useState<MealPlanSlot[]>([]);
   
-  // Function to fetch user data and set up meal logs listener
+  // TODAY’S PLAN STATES:
+  const [todaysPlan, setTodaysPlan] = useState<MealPlanSlot[]>([]);
+  const [planCreated, setPlanCreated] = useState<boolean>(false);
+  
+  // Function to fetch user data and meal logs listener
   const fetchUserDataAndMealLogs = async () => {
     if (auth.currentUser) {
       try {
         const userRef = doc(db, 'users', auth.currentUser.uid);
         const userDoc = await getDoc(userRef);
         if (userDoc.exists()) {
-          const data = userDoc.data() as UserData;
+          const data = userDoc.data();
           setUserData(data);
           
           // Check if we need to reset daily calories
           const today = new Date().toDateString();
-          const storedResetDate = userDoc.data().lastResetDate || '';
+          const storedResetDate = data.lastResetDate || '';
           
           if (storedResetDate !== today) {
-            // Reset calories for new day
             setCaloriesLeft(data.dailyCalorieTarget || 2000);
             setTotalCalories(0);
             setLastResetDate(today);
           } else {
             setLastResetDate(storedResetDate);
-            const todaysCals = userDoc.data().todayCalories || 0;
+            const todaysCals = data.todayCalories || 0;
             setTotalCalories(todaysCals);
             setCaloriesLeft((data.dailyCalorieTarget || 2000) - todaysCals);
             setIsCalorieExceeded(todaysCals > (data.dailyCalorieTarget || 2000));
@@ -105,7 +90,6 @@ const DashboardScreen: React.FC = () => {
         Alert.alert("Error", "Failed to load your profile data");
       }
     } else {
-      // Demo data for when user isn't authenticated
       setUserData({
         email: "user@example.com",
         dailyCalorieTarget: 2000,
@@ -115,25 +99,20 @@ const DashboardScreen: React.FC = () => {
     }
     
     const unsubscribe = setupMealLogsListener();
-
-    // Also fetch today's meal plan
     await fetchTodaysMealPlan();
     
     return unsubscribe;
   };
   
-  // Set up meal logs listener
+  // Meal logs listener setup
   const setupMealLogsListener = () => {
     if (!auth.currentUser) return () => {};
     
-    // Get today's date at midnight
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
     
-    // Listen for today's meal logs
     const mealsRef = collection(db, 'mealLogs');
     const todayMealsQuery = query(
       mealsRef,
@@ -144,7 +123,7 @@ const DashboardScreen: React.FC = () => {
     );
     
     const unsubscribe = onSnapshot(todayMealsQuery, (snapshot) => {
-      let meals: MealLog[] = [];
+      let meals: any[] = [];
       let totalCals = 0;
       let proteinTotal = 0;
       let carbsTotal = 0;
@@ -154,7 +133,7 @@ const DashboardScreen: React.FC = () => {
         const mealData = docSnap.data();
         const mealDate = mealData.date?.toDate ? mealData.date.toDate() : new Date(mealData.date);
         
-        const meal: MealLog = {
+        const meal = {
           id: docSnap.id,
           foodName: mealData.foodName || '',
           calories: mealData.calories || 0,
@@ -183,18 +162,14 @@ const DashboardScreen: React.FC = () => {
         const remaining = userData.dailyCalorieTarget - totalCals;
         setCaloriesLeft(remaining);
         setIsCalorieExceeded(remaining < 0);
-        
-        // Check if macro nutrients are exceeded
-        const proteinTarget = userData.dailyCalorieTarget * 0.25 / 4; // 4 calories per gram
+        const proteinTarget = userData.dailyCalorieTarget * 0.25 / 4;
         const carbsTarget = userData.dailyCalorieTarget * 0.5 / 4;
         const fatTarget = userData.dailyCalorieTarget * 0.25 / 9;
-        
         setIsProteinExceeded(proteinTotal > proteinTarget);
         setIsCarbsExceeded(carbsTotal > carbsTarget);
         setIsFatExceeded(fatTotal > fatTarget);
       }
       
-      // Update user document with today's calories
       if (auth.currentUser) {
         const userRef = doc(db, 'users', auth.currentUser.uid);
         const todayString = new Date().toDateString();
@@ -219,36 +194,33 @@ const DashboardScreen: React.FC = () => {
     return unsubscribe;
   };
   
-  // Fetch today's meal plan
+  // Updated: Do not filter out completed meals—keep all slots.
   const fetchTodaysMealPlan = async () => {
     if (!auth.currentUser) return;
     
     try {
-      // Get today's date in YYYY-MM-DD format
       const today = new Date().toISOString().split('T')[0];
-      
-      // Fetch the plan from Firestore
-      const planDoc = await getDoc(doc(db, `users/${auth.currentUser.uid}/plans`, today));
+      const planRef = doc(db, `users/${auth.currentUser.uid}/plans`, today);
+      const planDoc = await getDoc(planRef);
       
       if (planDoc.exists()) {
+        setPlanCreated(true);
         const planData = planDoc.data();
-        setTodaysPlan(planData.slots.filter(
-          (slot: MealPlanSlot) => slot.menuItem !== null
-        ));
+        setTodaysPlan(planData.slots);  // << Keep ALL slots, including completed (menuItem is null)
       } else {
+        setPlanCreated(false);
         setTodaysPlan([]);
       }
     } catch (error) {
-      console.error('Error fetching today\'s meal plan:', error);
+      console.error("Error fetching today's meal plan:", error);
     }
   };
 
-  // Log a meal from today's plan
+  // Log a planned meal.
   const logPlannedMeal = async (slot: MealPlanSlot) => {
     if (!auth.currentUser || !slot.menuItem) return;
     
     try {
-      // Create meal log entry
       await addDoc(collection(db, 'mealLogs'), {
         userId: auth.currentUser.uid,
         foodName: slot.menuItem.foodName,
@@ -258,14 +230,16 @@ const DashboardScreen: React.FC = () => {
         fat: slot.menuItem.fat || 0,
         date: new Date(),
         createdAt: serverTimestamp(),
-        mealType: slot.id, // Use slot id as meal type (breakfast, lunch, etc.)
-        location: {
-          name: slot.locationType === 'home' ? 'Home' : 'Restaurant',
-          type: slot.locationType
-        }
+        mealType: slot.name,
+        location: slot.locationType === 'home'
+          ? { name: 'Home', type: 'home' }
+          : { 
+              name: slot.menuItem.restaurantName || 'Restaurant', 
+              type: 'restaurant',
+              address: slot.menuItem.restaurantAddress || 'N/A'
+            }
       });
       
-      // Update the plan to mark this slot as logged
       const today = new Date().toISOString().split('T')[0];
       const planRef = doc(db, `users/${auth.currentUser.uid}/plans`, today);
       const planDoc = await getDoc(planRef);
@@ -277,9 +251,7 @@ const DashboardScreen: React.FC = () => {
         );
         
         await updateDoc(planRef, { slots: updatedSlots });
-        
-        // Update local state
-        setTodaysPlan(prevPlan => prevPlan.filter(s => s.id !== slot.id));
+        setTodaysPlan(updatedSlots);
       }
       
       Alert.alert('Success', 'Meal logged successfully!');
@@ -289,31 +261,18 @@ const DashboardScreen: React.FC = () => {
     }
   };
   
-  // Use useFocusEffect to refresh data when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       setLoading(true);
-      
-      // Define a function to call the async operation and handle cleanup
       const loadData = async () => {
         const unsubscribe = await fetchUserDataAndMealLogs();
         setLoading(false);
-        // Return cleanup function
-        return () => {
-          if (typeof unsubscribe === 'function') {
-            unsubscribe();
-          }
-        };
+        return unsubscribe;
       };
-      
-      // Call the function immediately
       const cleanup = loadData();
-      
-      // Return a cleanup function that will call the cleanup returned by loadData
       return () => {
-        // We need to handle the Promise returned by loadData
         cleanup.then(cleanupFn => {
-          if (cleanupFn) {
+          if (typeof cleanupFn === 'function') {
             cleanupFn();
           }
         }).catch(err => {
@@ -323,21 +282,14 @@ const DashboardScreen: React.FC = () => {
     }, [])
   );
   
-  // Initial setup
   useEffect(() => {
     setLoading(true);
-    
-    // Define a function to call the async operation and handle cleanup
     const loadData = async () => {
       const unsubscribe = await fetchUserDataAndMealLogs();
       setLoading(false);
       return unsubscribe;
     };
-    
-    // Call the function immediately
     const cleanupPromise = loadData();
-    
-    // Return a cleanup function
     return () => {
       cleanupPromise.then(cleanup => {
         if (typeof cleanup === 'function') {
@@ -418,9 +370,8 @@ const DashboardScreen: React.FC = () => {
   };
 
   const renderMacroProgress = () => {
-    // Example targets (customize as needed)
     const dailyTarget = userData?.dailyCalorieTarget || 2000;
-    const proteinTarget = dailyTarget * 0.25 / 4; // 4 calories per gram
+    const proteinTarget = dailyTarget * 0.25 / 4;
     const carbsTarget = dailyTarget * 0.5 / 4;
     const fatTarget = dailyTarget * 0.25 / 9;
     
@@ -429,10 +380,7 @@ const DashboardScreen: React.FC = () => {
         <View style={styles.macroItem}>
           <View style={styles.macroHeader}>
             <Text style={[styles.macroLabel, isDark && styles.textLight]}>Protein</Text>
-            <Text style={[
-              styles.macroValue,
-              isProteinExceeded && styles.exceededText
-            ]}>
+            <Text style={[styles.macroValue, isProteinExceeded && styles.exceededText, isDark && styles.textLight]}>
               {Math.round(totalProtein)}g
               <Text style={[styles.macroTarget, isDark && styles.macroTargetDark]}> / {Math.round(proteinTarget)}g</Text>
               {isProteinExceeded && <Text style={styles.exceededIndicator}> (Exceeded)</Text>}
@@ -454,11 +402,7 @@ const DashboardScreen: React.FC = () => {
         <View style={styles.macroItem}>
           <View style={styles.macroHeader}>
             <Text style={[styles.macroLabel, isDark && styles.textLight]}>Carbs</Text>
-            <Text style={[
-              styles.macroValue,
-              isCarbsExceeded && styles.exceededText,
-              isDark && styles.textLight
-            ]}>
+            <Text style={[styles.macroValue, isCarbsExceeded && styles.exceededText, isDark && styles.textLight]}>
               {Math.round(totalCarbs)}g
               <Text style={[styles.macroTarget, isDark && styles.macroTargetDark]}> / {Math.round(carbsTarget)}g</Text>
               {isCarbsExceeded && <Text style={styles.exceededIndicator}> (Exceeded)</Text>}
@@ -480,11 +424,7 @@ const DashboardScreen: React.FC = () => {
         <View style={styles.macroItem}>
           <View style={styles.macroHeader}>
             <Text style={[styles.macroLabel, isDark && styles.textLight]}>Fat</Text>
-            <Text style={[
-              styles.macroValue,
-              isFatExceeded && styles.exceededText,
-              isDark && styles.textLight
-            ]}>
+            <Text style={[styles.macroValue, isFatExceeded && styles.exceededText, isDark && styles.textLight]}>
               {Math.round(totalFat)}g
               <Text style={[styles.macroTarget, isDark && styles.macroTargetDark]}> / {Math.round(fatTarget)}g</Text>
               {isFatExceeded && <Text style={styles.exceededIndicator}> (Exceeded)</Text>}
@@ -506,18 +446,32 @@ const DashboardScreen: React.FC = () => {
     );
   };
 
-  // Format time for display (convert from 24h to 12h format)
   const formatTimeForDisplay = (time: string) => {
     if (!time) return "";
-    
     const [hours, minutes] = time.split(':').map(Number);
     const period = hours >= 12 ? 'PM' : 'AM';
-    const displayHours = hours % 12 || 12; // convert 0 to 12 for 12 AM
+    const displayHours = hours % 12 || 12;
     return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
   };
 
-  // Render today's plan section
+  // Updated render function for today’s plan with enhanced completed UI.
   const renderTodaysPlan = () => {
+    if (!planCreated) {
+      return (
+        <View style={[styles.emptyPlanContainer, isDark && styles.emptyPlanContainerDark]}>
+          <Text style={[styles.emptyPlanText, isDark && styles.textLight]}>
+            No meal plan for today
+          </Text>
+          <TouchableOpacity
+            style={styles.createPlanButton}
+            onPress={navigateToPlanMyDay}
+          >
+            <Text style={styles.createPlanButtonText}>Create Plan</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    
     if (todaysPlan.length === 0) {
       return (
         <View style={[styles.emptyPlanContainer, isDark && styles.emptyPlanContainerDark]}>
@@ -534,6 +488,20 @@ const DashboardScreen: React.FC = () => {
       );
     }
     
+    // If every slot is completed, show a dedicated, enhanced UI.
+    const allCompleted = todaysPlan.every(slot => !slot.menuItem);
+    if (allCompleted) {
+      return (
+        <View style={[styles.completedPlanContainer, isDark && styles.completedPlanContainerDark]}>
+          <Check size={40} color="#2ecc71" />
+          <Text style={[styles.completedPlanTitle, isDark && styles.textLight]}>Meal Plan Completed!</Text>
+          <Text style={[styles.completedPlanSubtitle, isDark && styles.textLight]}>
+            Great job completing today's plan!
+          </Text>
+        </View>
+      );
+    }
+    
     return (
       <View style={styles.planContainer}>
         {todaysPlan.map(slot => (
@@ -544,28 +512,32 @@ const DashboardScreen: React.FC = () => {
                 {formatTimeForDisplay(slot.time)}
               </Text>
             </View>
-            
-            {slot.menuItem && (
+            {slot.menuItem ? (
               <>
                 <View style={styles.planItemDetails}>
                   <View style={styles.planItemFood}>
                     <Text style={[styles.planItemFoodName, isDark && styles.textLight]}>
                       {slot.menuItem.foodName}
                     </Text>
+                    {slot.locationType === 'restaurant' && slot.menuItem.location && slot.menuItem.location.name && (
+                      <Text style={[styles.restaurantDetails, isDark && styles.textLight]}>
+                        {slot.menuItem.location.name}
+                        {slot.menuItem.location.address ? ` - ${slot.menuItem.location.address}` : ''}
+                      </Text>
+                    )}
                     <View style={styles.planItemMacros}>
                       <Text style={styles.planItemCalories}>{Math.round(slot.menuItem.calories)} cal</Text>
                       <Text style={[styles.planItemMacro, isDark && styles.planItemMacroDark]}>
-                        P: {Math.round(slot.menuItem.protein || 0)}g
+                        P: {slot.menuItem.protein ? Math.round(slot.menuItem.protein) : 0}g
                       </Text>
                       <Text style={[styles.planItemMacro, isDark && styles.planItemMacroDark]}>
-                        C: {Math.round(slot.menuItem.carbs || 0)}g
+                        C: {slot.menuItem.carbs ? Math.round(slot.menuItem.carbs) : 0}g
                       </Text>
                       <Text style={[styles.planItemMacro, isDark && styles.planItemMacroDark]}>
-                        F: {Math.round(slot.menuItem.fat || 0)}g
+                        F: {slot.menuItem.fat ? Math.round(slot.menuItem.fat) : 0}g
                       </Text>
                     </View>
                   </View>
-                  
                   <TouchableOpacity
                     style={styles.planItemLogButton}
                     onPress={() => logPlannedMeal(slot)}
@@ -573,13 +545,17 @@ const DashboardScreen: React.FC = () => {
                     <Check size={16} color="#fff" />
                   </TouchableOpacity>
                 </View>
-                
                 <View style={styles.planItemLocation}>
                   <Text style={[styles.planItemLocationText, isDark && styles.planItemLocationTextDark]}>
                     {slot.locationType === 'home' ? '🏠 Home' : '🍽️ Restaurant'}
                   </Text>
                 </View>
               </>
+            ) : (
+              <View style={styles.completedContainer}>
+                <Check size={16} color="#2ecc71" />
+                <Text style={[styles.completedText, isDark && styles.textLight]}>Meal Completed</Text>
+              </View>
             )}
           </View>
         ))}
@@ -621,16 +597,14 @@ const DashboardScreen: React.FC = () => {
                 styles.progressFill, 
                 { 
                   width: `${Math.min(100, (totalCalories / (userData?.dailyCalorieTarget || 2000)) * 100)}%`,
-                  backgroundColor: isCalorieExceeded ? '#e74c3c' : '#2ecc71' 
+                  backgroundColor: isCalorieExceeded ? '#e74c3c' : '#2ecc71'
                 }
-              ]} 
+              ]}
             />
           </View>
           <View style={styles.progressLabels}>
             <Text style={[styles.progressLabel, isDark && styles.progressLabelDark]}>{Math.round(totalCalories)} consumed</Text>
-            <Text style={[styles.progressLabel, isDark && styles.progressLabelDark]}>
-              {userData?.dailyCalorieTarget || 2000} goal
-            </Text>
+            <Text style={[styles.progressLabel, isDark && styles.progressLabelDark]}>{userData?.dailyCalorieTarget || 2000} goal</Text>
           </View>
         </View>
         
@@ -657,7 +631,6 @@ const DashboardScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
       
-      {/* Plan My Day Button */}
       <TouchableOpacity 
         style={[styles.planMyDayButton, isDark && styles.planMyDayButtonDark]} 
         onPress={navigateToPlanMyDay}
@@ -666,7 +639,6 @@ const DashboardScreen: React.FC = () => {
         <Text style={styles.planMyDayText}>Plan My Day</Text>
       </TouchableOpacity>
       
-      {/* Today's Plan Section */}
       <View style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, isDark && styles.sectionTitleDark]}>Today's Plan</Text>
       </View>
@@ -690,15 +662,13 @@ const DashboardScreen: React.FC = () => {
           <Text style={[styles.loadingText, isDark && styles.textLight]}>Loading your dashboard...</Text>
         </View>
       ) : (
-        <>
-          <ScrollView 
-            style={styles.scrollView} 
-            contentContainerStyle={[styles.contentContainer, isDark && styles.contentContainerDark]}
-            showsVerticalScrollIndicator={false}
-          >
-            {doDisplayDashboard()}
-          </ScrollView>
-        </>
+        <ScrollView 
+          style={styles.scrollView} 
+          contentContainerStyle={[styles.contentContainer, isDark && styles.contentContainerDark]}
+          showsVerticalScrollIndicator={false}
+        >
+          {doDisplayDashboard()}
+        </ScrollView>
       )}
     </View>
   );
@@ -733,8 +703,8 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 20,
-    paddingTop: Platform.OS === 'ios' ? 60 : 40, // Increased top padding for notch
-    paddingBottom: 90, // Extra padding for tab bar
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingBottom: 90,
   },
   contentContainerDark: {
     backgroundColor: '#121212',
@@ -784,11 +754,13 @@ const styles = StyleSheet.create({
     color: '#aaa',
   },
   calorieValue: {
-    fontSize: 36,
+    fontSize: 48,
     fontWeight: 'bold',
     color: '#2ecc71',
   },
   calorieValueDark: {
+    fontSize: 48,
+    fontWeight: 'bold',
     color: '#2ecc71',
   },
   calorieValueExceeded: {
@@ -1035,6 +1007,11 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 4,
   },
+  restaurantDetails: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 4,
+  },
   planItemMacros: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1137,11 +1114,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  calorieValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2ecc71',
-  },
   calorieLabel: {
     fontSize: 12,
     color: '#888',
@@ -1176,6 +1148,41 @@ const styles = StyleSheet.create({
   emptyStateTextDark: {
     backgroundColor: '#1e1e1e',
     color: '#aaa',
+  },
+  completedContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    justifyContent: 'center',
+  },
+  completedText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2ecc71',
+    marginLeft: 6,
+  },
+  // New style for full-day completed UI
+  completedPlanContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    backgroundColor: '#e8f5e9',
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  completedPlanContainerDark: {
+    backgroundColor: '#2e7d32',
+  },
+  completedPlanTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2ecc71',
+    marginTop: 8,
+  },
+  completedPlanSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 4,
   }
 });
 

@@ -1,3 +1,4 @@
+// PlanMyDayScreen.tsx
 import React, { useState, useEffect, useContext } from 'react';
 import {
   View,
@@ -8,7 +9,8 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  TextInput
+  TextInput,
+  KeyboardAvoidingView
 } from 'react-native';
 import { router } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
@@ -16,7 +18,6 @@ import {
   doc,
   getDoc,
   collection,
-  addDoc,
   serverTimestamp,
   updateDoc,
   setDoc,
@@ -35,15 +36,15 @@ import {
 import * as Notifications from 'expo-notifications';
 import { ThemeContext } from '../../context/ThemeContext';
 import MealPlanCard from '../../components/MealPlanCard';
-import { Restaurant, MealSlot, MenuItem } from '../../types/mealPlanner';
+import { MealSlot } from '../../types/mealPlanner';
 
-// ---------------------------------------------------------------------
-// Constants & DeepSeek Configuration (Using HTTP requests)
-// ---------------------------------------------------------------------
+//////////////////////////////////////////////////////////////////////////
+// DeepSeek Constants (Using DeepSeek API)
+//////////////////////////////////////////////////////////////////////////
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
 const DEEPSEEK_API_KEY = 'sk-95593a35636148368ec4a6d868bf1bb8';
 
-// If you want notifications, keep this; otherwise remove.
+// Set notification handler for foreground notifications
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -56,9 +57,9 @@ const PlanMyDayScreen: React.FC = () => {
   const { theme } = useContext(ThemeContext);
   const isDark = theme === 'dark';
 
-  // -----------------------
-  // State variables
-  // -----------------------
+  //////////////////////////////////////////////////////////////////////
+  // Local State
+  //////////////////////////////////////////////////////////////////////
   const [dietaryPreferences, setDietaryPreferences] = useState<string[]>([]);
   const [availablePreferences] = useState<{ id: string; label: string }[]>([
     { id: 'vegetarian', label: 'Vegetarian' },
@@ -68,12 +69,12 @@ const PlanMyDayScreen: React.FC = () => {
     { id: 'ketogenic', label: 'Ketogenic' },
     { id: 'paleo', label: 'Paleo' },
   ]);
+
   const [dailyCalorieTarget, setDailyCalorieTarget] = useState<number>(2000);
   const [todayCalories, setTodayCalories] = useState<number>(0);
   const remainingCalories = Math.max(0, dailyCalorieTarget - todayCalories);
 
-  // We have 4 guaranteed meals: breakfast, lunch, “snack” (after dinner), dinner
-  // Let user pick “home” or “restaurant” for each before generating the plan
+  // Meal settings: which mode per meal.
   const [mealSettings, setMealSettings] = useState<{
     breakfast: 'home' | 'restaurant';
     lunch: 'home' | 'restaurant';
@@ -82,38 +83,36 @@ const PlanMyDayScreen: React.FC = () => {
   }>({
     breakfast: 'home',
     lunch: 'home',
-    snack: 'home', // “snack (after dinner)”
+    snack: 'home',
     dinner: 'home'
   });
 
-  // Final slots after plan generation
+  // Final meal slots and UI states.
   const [slots, setSlots] = useState<MealSlot[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  // isPlanSaved is used to indicate if the plan as loaded from Firestore is saved.
+  // It will be marked false on any user edit/regeneration to allow saving.
   const [isPlanSaved, setIsPlanSaved] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Plan feedback—only relevant if a plan is generated
+  // Plan feedback and single-meal swap reasons.
   const [planFeedback, setPlanFeedback] = useState<string>('');
-
-  // Reason for swapping each meal
   const [swapReasons, setSwapReasons] = useState<{ [key: string]: string }>({});
-
-  // For meal-level re-generation (swapping) loading indicator
   const [swappingMeal, setSwappingMeal] = useState<string | null>(null);
 
-  // ---------------------------------------------------------------------
-  // Initialization: load user data and saved plan if it exists.
-  // ---------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////
+  // Initialization: load user data and saved plan (if any) for today
+  //////////////////////////////////////////////////////////////////////
   useEffect(() => {
     const init = async () => {
       if (!auth.currentUser) {
         setLoading(false);
-        setError('You must be logged in to use PlanMyDay');
+        setError('You must be logged in to use PlanMyDay.');
         return;
       }
       try {
-        // 1. Load user doc and preferences.
+        // Load user document data.
         const userRef = doc(db, 'users', auth.currentUser.uid);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
@@ -128,8 +127,7 @@ const PlanMyDayScreen: React.FC = () => {
             setTodayCalories(userData.todayCalories);
           }
         }
-
-        // 2. Check if a plan exists for today
+        // Check if plan exists for today.
         const today = new Date().toISOString().split('T')[0];
         const planRef = doc(db, `users/${auth.currentUser.uid}/plans`, today);
         const planSnap = await getDoc(planRef);
@@ -148,12 +146,12 @@ const PlanMyDayScreen: React.FC = () => {
     init();
   }, []);
 
-  // ---------------------------------------------------------------------
-  // Distance calculation & location-based filtering
-  // ---------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////
+  // Utility: Convert degrees to radians and calculate distance.
+  //////////////////////////////////////////////////////////////////////
   const toRad = (deg: number) => deg * (Math.PI / 180);
   const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-    const R = 6371; // Earth radius in km
+    const R = 6371; // in km
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
     const a =
@@ -163,27 +161,27 @@ const PlanMyDayScreen: React.FC = () => {
     return R * c;
   };
 
-  // For demonstration, a default location near NTU, you can customize
+  // Default location (for example, near NTU)
   const LATITUDE = 1.355049655134308;
   const LONGITUDE = 103.68518139204353;
 
-  // ---------------------------------------------------------------------
-  // Fetch nearby menu items from Firestore
-  // ---------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////
+  // Fetch nearby restaurant items from Firestore (all restaurants within 2 km)
+  //////////////////////////////////////////////////////////////////////
   const fetchNearbyMenuItems = async (): Promise<any[]> => {
     try {
       const snapshot = await getDocs(collection(db, 'restaurants'));
       const nearbyItems: any[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data.location) {
+        if (data.location && data.items) {
           const dist = getDistance(
             data.location.lat,
             data.location.lng,
             LATITUDE,
             LONGITUDE
           );
-          if (dist < 2.0 && data.items) {
+          if (dist < 2.0) {
             data.items.forEach((item: any) => {
               nearbyItems.push({
                 ...item,
@@ -201,68 +199,94 @@ const PlanMyDayScreen: React.FC = () => {
     }
   };
 
-  // ---------------------------------------------------------------------
-  // Generate Meal Plan using DeepSeek
-  // ---------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////
+  // Group restaurant items by restaurant (using "restaurantName" and "restaurantAddress")
+  //////////////////////////////////////////////////////////////////////
+  const groupItemsByRestaurant = (items: any[]): { [key: string]: any[] } => {
+    const grouped: { [key: string]: any[] } = {};
+    items.forEach((item) => {
+      const rName = item.restaurantName || 'Unknown';
+      const rAddr = item.restaurantAddress || 'N/A';
+      const key = `${rName}__${rAddr}`;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(item);
+    });
+    return grouped;
+  };
+
+  //////////////////////////////////////////////////////////////////////
+  // Generate Meal Plan using DeepSeek API (with grouping for restaurants)
+  //////////////////////////////////////////////////////////////////////
   const generateMealPlan = async (feedback: string = ''): Promise<MealSlot[]> => {
-    // We have 4 guaranteed meals: breakfast, lunch, snack, dinner
-    // Use mealSettings to determine locationType
-    // Build the textual info about each meal
+    // Five guaranteed meals.
+    const guaranteedMeals = ['breakfast', 'lunch', 'snack', 'dinner', 'snack'];
 
-    // For convenience, we’ll store them in an array
-    const guaranteedMeals = ['breakfast', 'lunch', 'snack', 'dinner'];
-
-    // Gather nearby restaurant data
+    // Gather all restaurant menu items.
     const nearbyMenuItems = await fetchNearbyMenuItems();
+    // Group restaurant items to avoid repeating restaurant name/address.
+    const restaurantGroups = groupItemsByRestaurant(nearbyMenuItems);
 
-    // Build available dishes text for each meal
+    // Build available dishes text for each meal.
     const availableByMeal: { [key: string]: string } = {};
     guaranteedMeals.forEach((meal) => {
-      const setting = mealSettings[meal as keyof typeof mealSettings];
+      const setting = mealSettings[meal as keyof typeof mealSettings] || 'home';
       if (setting === 'restaurant') {
-        // Show items from Firestore
-        const items = nearbyMenuItems.map(
-          (i) =>
-            `${i.foodName} (${i.calories} kcal) from ${i.restaurantName} [Address: ${i.restaurantAddress}]`
-        );
-        availableByMeal[meal] = items.length ? items.join('\n') : 'No dishes found';
+        if (Object.keys(restaurantGroups).length === 0) {
+          availableByMeal[meal] = 'No restaurant data found.';
+        } else {
+          let block = '';
+          for (const key in restaurantGroups) {
+            const [rName, rAddr] = key.split('__');
+            block += `\nRestaurant: ${rName}, ${rAddr}\n`;
+            const dishes = restaurantGroups[key];
+            for (const dish of dishes) {
+              block += `  - ${dish.foodName} (${dish.calories} cal, P:${dish.protein || 0}g C:${dish.carbs || 0}g F:${dish.fat || 0}g)\n`;
+            }
+          }
+          availableByMeal[meal] = block.trim();
+        }
       } else {
-        availableByMeal[meal] = 'User will cook at home. You can invent any realistic dish.';
+        availableByMeal[meal] =
+          'User will cook at home. You can invent a dish with realistic macros.';
       }
     });
 
-    const dietLabels = dietaryPreferences.length
-      ? dietaryPreferences.join(', ')
-      : 'None';
+    const dietLabels = dietaryPreferences.length ? dietaryPreferences.join(', ') : 'None';
 
+    // Create the system and user prompts for DeepSeek.
     const systemPrompt = `
 You are a meal recommendation assistant.
-Only return answers in the format specified by the user.
+Only return answers in the exact format specified below.
 Never guess the calories for restaurant items; use the data provided.
-Ignore any meal timing constraints.
+Include macros (protein, carbs, fat) for each dish.
+Ignore meal timing constraints.
     `;
 
     let userPrompt = `
 Generate a meal plan for today with these constraints:
 
-**Calories Remaining**: ${remainingCalories} kcal
+**Calories Remaining**: ${remainingCalories}
 **Dietary Preferences**: ${dietLabels}
 **User Feedback**: ${feedback || 'None'}
 
-We have four guaranteed meals: 
+We have five guaranteed meals:
 1) Breakfast
 2) Lunch
-3) Snack (after dinner)
+3) Snack
 4) Dinner
+5) Snack
 
-If you need to add an extra snack to fit leftover calories, feel free to do so.
+If needed, feel free to add an extra snack.
 
-For each meal, use this format exactly (no time range needed):
+For each meal, use exactly this format (no time required):
 
 ---
 **Meal**: <meal name>
 **Dish**: <dish name>
 **Calories**: <kcal>
+**Protein**: <g>
+**Carbs**: <g>
+**Fat**: <g>
 **Restaurant**: <restaurant name or 'home'>
 **Address**: <restaurant address or 'N/A'>
 **Why this dish**: <short reason>
@@ -270,14 +294,15 @@ For each meal, use this format exactly (no time range needed):
 
 Available dishes per meal:
     `;
+
     guaranteedMeals.forEach((meal) => {
-      userPrompt += `\n🍽️ ${meal.toUpperCase()} (${mealSettings[meal as keyof typeof mealSettings]}):\n${availableByMeal[meal]}\n`;
+      userPrompt += `\n🍽️ ${meal.toUpperCase()} (${mealSettings[meal as keyof typeof mealSettings] || 'home'}):\n${availableByMeal[meal]}\n`;
     });
 
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt }
-    ];
+    // Log for debugging.
+    console.log('Sending Plan Generation Request to DeepSeek...');
+    console.log('System Prompt:', systemPrompt);
+    console.log('User Prompt:', userPrompt);
 
     try {
       const response = await fetch(`${DEEPSEEK_BASE_URL}/v1/chat/completions`, {
@@ -288,20 +313,36 @@ Available dishes per meal:
         },
         body: JSON.stringify({
           model: 'deepseek-chat',
-          messages,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
           temperature: 0.7
         })
       });
 
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('DeepSeek API response not ok:', text);
+        throw new Error(`DeepSeek API Error: ${response.status} - ${text}`);
+      }
+
       const completionData = await response.json();
+      console.log('DeepSeek API response:', completionData);
+
       const rawResponse = completionData.choices?.[0]?.message?.content || '';
+      console.log('Raw GPT response:', rawResponse);
+
       const sections = rawResponse.split('---').filter((sec: string) => sec.trim() !== '');
       const newSlots: MealSlot[] = [];
 
       sections.forEach((section, idx) => {
         const mealMatch = section.match(/\*\*Meal\*\*:\s*(.+)/);
         const dishMatch = section.match(/\*\*Dish\*\*:\s*(.+)/);
-        const caloriesMatch = section.match(/\*\*Calories\*\*:\s*(.+)/);
+        const calMatch = section.match(/\*\*Calories\*\*:\s*(.+)/);
+        const proteinMatch = section.match(/\*\*Protein\*\*:\s*(.+)/);
+        const carbsMatch = section.match(/\*\*Carbs\*\*:\s*(.+)/);
+        const fatMatch = section.match(/\*\*Fat\*\*:\s*(.+)/);
         const restaurantMatch = section.match(/\*\*Restaurant\*\*:\s*(.+)/);
         const addressMatch = section.match(/\*\*Address\*\*:\s*(.+)/);
         const whyMatch = section.match(/\*\*Why this dish\*\*:\s*(.+)/);
@@ -309,7 +350,10 @@ Available dishes per meal:
         if (
           mealMatch &&
           dishMatch &&
-          caloriesMatch &&
+          calMatch &&
+          proteinMatch &&
+          carbsMatch &&
+          fatMatch &&
           restaurantMatch &&
           addressMatch &&
           whyMatch
@@ -318,11 +362,18 @@ Available dishes per meal:
             id: Date.now().toString() + '-' + idx,
             name: mealMatch[1].trim(),
             time: '',
-            locationType: restaurantMatch[1].trim().toLowerCase() === 'home' ? 'home' : 'restaurant',
+            locationType:
+              restaurantMatch[1].trim().toLowerCase() === 'home' ? 'home' : 'restaurant',
             menuItem: {
               foodName: dishMatch[1].trim(),
-              calories: parseInt(caloriesMatch[1].trim(), 10),
-              restaurantName: restaurantMatch[1].trim(),
+              calories: parseInt(calMatch[1].trim(), 10),
+              protein: parseInt(proteinMatch[1].trim(), 10) || 0,
+              carbs: parseInt(carbsMatch[1].trim(), 10) || 0,
+              fat: parseInt(fatMatch[1].trim(), 10) || 0,
+              restaurantName:
+                restaurantMatch[1].trim() === 'home'
+                  ? ''
+                  : restaurantMatch[1].trim(),
               restaurantAddress: addressMatch[1].trim()
             },
             reason: whyMatch[1].trim(),
@@ -331,16 +382,18 @@ Available dishes per meal:
           });
         }
       });
+
+      console.log('Parsed Meal Plan Slots:', newSlots);
       return newSlots;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error generating meal plan:', err);
-      return [];
+      throw err;
     }
   };
 
-  // ---------------------------------------------------------------------
-  // Handle Plan Generation
-  // ---------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////
+  // Handle Entire Plan Generation
+  //////////////////////////////////////////////////////////////////////
   const handleGeneratePlan = async () => {
     if (remainingCalories <= 0) {
       Alert.alert('No calories remaining', 'You have used up your calories for today.');
@@ -350,49 +403,63 @@ Available dishes per meal:
     setError(null);
     try {
       const newSlots = await generateMealPlan(planFeedback);
-      setSlots(newSlots);
-      setIsPlanSaved(false);
-    } catch (err) {
-      setError('Meal plan generation failed.');
-      console.error(err);
+      if (!newSlots || newSlots.length === 0) {
+        setError('No meal plan returned. Try again or modify your feedback.');
+      } else {
+        setSlots(newSlots);
+        // Mark the plan as edited (unsaved)
+        setIsPlanSaved(false);
+      }
+    } catch (err: any) {
+      setError(`Meal plan generation failed. ${err.message || ''}`);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // ---------------------------------------------------------------------
-  // Meal Swap (re-gen for a single slot)
-  // ---------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////
+  // Single Meal Swap Handler
+  //////////////////////////////////////////////////////////////////////
   const handleSwapMeal = async (slotId: string, swapReason: string) => {
     const slot = slots.find((s) => s.id === slotId);
     if (!slot) return;
-
-    setSwappingMeal(slotId); // show loading indicator for this slot
+    setSwappingMeal(slotId);
 
     let availableDishes = '';
     if (slot.locationType === 'restaurant') {
-      const nearbyItems = await fetchNearbyMenuItems();
-      availableDishes = nearbyItems
-        .map(
-          (i: any) =>
-            `${i.foodName} (${i.calories} kcal) from ${i.restaurantName} [Address: ${i.restaurantAddress}]`
-        )
-        .join('\n');
+      try {
+        const nearbyItems = await fetchNearbyMenuItems();
+        const restaurantGroups = groupItemsByRestaurant(nearbyItems);
+        if (Object.keys(restaurantGroups).length === 0) {
+          availableDishes = 'No restaurant data found.';
+        } else {
+          let block = '';
+          for (const key in restaurantGroups) {
+            const [rName, rAddr] = key.split('__');
+            block += `\nRestaurant: ${rName}, ${rAddr}\n`;
+            const dishes = restaurantGroups[key];
+            for (const dish of dishes) {
+              block += `  - ${dish.foodName} (${dish.calories} cal, P:${dish.protein || 0}g C:${dish.carbs || 0}g F:${dish.fat || 0}g)\n`;
+            }
+          }
+          availableDishes = block.trim();
+        }
+      } catch (err) {
+        console.error('Error fetching restaurant items for swap:', err);
+      }
     } else {
-      availableDishes = 'User will cook at home. Be creative!';
+      availableDishes = 'User will cook at home. Provide realistic macros.';
     }
 
-    const messages = [
-      {
-        role: 'system',
-        content: `You are a meal swapping assistant. Only return the swapped meal in the specified format.
-Use only the provided calories from the data.
-Ignore time constraints entirely.`
-      },
-      {
-        role: 'user',
-        content: `
-I want to swap just one meal.
+    const systemMsg = `
+You are a meal swapping assistant.
+Only return the swapped meal in the exact format provided.
+Include macros (protein, carbs, fat).
+Use only the provided restaurant data if applicable.
+Ignore meal timing constraints.
+    `;
+    const userMsg = `
+I want to swap one meal.
 
 **Meal to swap**: ${slot.name}
 **Reason**: ${swapReason || 'None'}
@@ -403,17 +470,22 @@ I want to swap just one meal.
 Here are available dishes for this meal:
 ${availableDishes}
 
-Only return this format:
+Only return this exact format:
 ---
 **Meal**: ${slot.name}
 **Dish**: <dish name>
 **Calories**: <kcal>
+**Protein**: <g>
+**Carbs**: <g>
+**Fat**: <g>
 **Restaurant**: <restaurant name or 'home'>
 **Address**: <restaurant address or 'N/A'>
 **Why this dish**: <reason>
 ---
-`
-      }
+    `;
+    const messages = [
+      { role: 'system', content: systemMsg },
+      { role: 'user', content: userMsg }
     ];
 
     try {
@@ -429,48 +501,63 @@ Only return this format:
           temperature: 0.7
         })
       });
+
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('DeepSeek Swap Meal API response not ok:', text);
+        throw new Error(`DeepSeek swap meal error: ${response.status} - ${text}`);
+      }
+
       const completionData = await response.json();
+      console.log('DeepSeek Swap Meal response:', completionData);
       const rawResponse = completionData.choices?.[0]?.message?.content || '';
+      console.log('Raw Swap Meal response:\n', rawResponse);
+
       const section = rawResponse.split('---').find((s: string) => s.trim() !== '');
       if (section) {
-        const mealMatch = section.match(/\*\*Meal\*\*:\s*(.+)/);
         const dishMatch = section.match(/\*\*Dish\*\*:\s*(.+)/);
-        const caloriesMatch = section.match(/\*\*Calories\*\*:\s*(.+)/);
+        const calMatch = section.match(/\*\*Calories\*\*:\s*(.+)/);
+        const proteinMatch = section.match(/\*\*Protein\*\*:\s*(.+)/);
+        const carbsMatch = section.match(/\*\*Carbs\*\*:\s*(.+)/);
+        const fatMatch = section.match(/\*\*Fat\*\*:\s*(.+)/);
         const restaurantMatch = section.match(/\*\*Restaurant\*\*:\s*(.+)/);
         const addressMatch = section.match(/\*\*Address\*\*:\s*(.+)/);
         const whyMatch = section.match(/\*\*Why this dish\*\*:\s*(.+)/);
+
         if (
-          mealMatch &&
-          dishMatch &&
-          caloriesMatch &&
-          restaurantMatch &&
-          addressMatch &&
-          whyMatch
+          dishMatch && calMatch &&
+          proteinMatch && carbsMatch && fatMatch &&
+          restaurantMatch && addressMatch && whyMatch
         ) {
           const newSlot = {
             ...slot,
             menuItem: {
               foodName: dishMatch[1].trim(),
-              calories: parseInt(caloriesMatch[1].trim(), 10),
-              restaurantName: restaurantMatch[1].trim(),
+              calories: parseInt(calMatch[1].trim(), 10),
+              protein: parseInt(proteinMatch[1].trim(), 10) || 0,
+              carbs: parseInt(carbsMatch[1].trim(), 10) || 0,
+              fat: parseInt(fatMatch[1].trim(), 10) || 0,
+              restaurantName: restaurantMatch[1].trim() === 'home' ? '' : restaurantMatch[1].trim(),
               restaurantAddress: addressMatch[1].trim()
             },
             reason: whyMatch[1].trim()
           };
           setSlots((curr) => curr.map((s) => (s.id === slotId ? newSlot : s)));
+          // Mark plan as edited
+          setIsPlanSaved(false);
         }
       }
     } catch (err) {
-      console.error('Error swapping meal:', err);
+      console.error('Error swapping meal with DeepSeek:', err);
       Alert.alert('Error', 'Failed to swap meal');
     } finally {
       setSwappingMeal(null);
     }
   };
 
-  // ---------------------------------------------------------------------
-  // Save the current plan to Firestore
-  // ---------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////
+  // Save Plan to Firestore
+  //////////////////////////////////////////////////////////////////////
   const handleSavePlan = async () => {
     if (!auth.currentUser) {
       Alert.alert('Login Required', 'Please log in first');
@@ -480,7 +567,7 @@ Only return this format:
     try {
       await setDoc(doc(db, `users/${auth.currentUser.uid}/plans`, today), {
         slots: slots,
-        createdAt: serverTimestamp(),
+        createdAt: serverTimestamp()
       });
       setIsPlanSaved(true);
       Alert.alert('Success', 'Meal plan saved for today!', [
@@ -492,42 +579,9 @@ Only return this format:
     }
   };
 
-  // ---------------------------------------------------------------------
-  // Quick Log Implementation
-  // ---------------------------------------------------------------------
-  const handleQuickLog = async (slotId: string) => {
-    const slot = slots.find((s) => s.id === slotId);
-    if (!slot || !slot.menuItem) return;
-
-    if (!auth.currentUser) {
-      Alert.alert('Login Required', 'Please log in to quick log a meal.');
-      return;
-    }
-
-    try {
-      await addDoc(collection(db, 'mealLogs'), {
-        userId: auth.currentUser.uid,
-        date: new Date(),
-        createdAt: serverTimestamp(),
-        mealName: slot.name,
-        mealLocation: slot.locationType,
-        dish: slot.menuItem.foodName,
-        calories: slot.menuItem.calories,
-        restaurantName: slot.menuItem.restaurantName || 'home',
-        restaurantAddress: slot.menuItem.restaurantAddress || 'N/A',
-      });
-      Alert.alert('Success', 'Meal has been quick-logged!');
-    } catch (err) {
-      console.error('handleQuickLog error:', err);
-      Alert.alert('Error', 'Failed to log meal');
-    }
-  };
-
-  // ---------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////
   // Rendering UI Sections
-  // ---------------------------------------------------------------------
-
-  // 1) Meal Settings UI: user picks home/restaurant for each meal
+  //////////////////////////////////////////////////////////////////////
   const renderMealSettings = () => (
     <View style={[styles.section, isDark && styles.sectionDark]}>
       <View style={styles.sectionHeader}>
@@ -539,13 +593,14 @@ Only return this format:
       {['breakfast', 'lunch', 'snack', 'dinner'].map((meal) => (
         <View key={meal} style={styles.mealSettingRow}>
           <Text style={[styles.mealSettingLabel, isDark && styles.textLight]}>
-            {meal === 'snack' ? 'Snack (after dinner)' : meal.charAt(0).toUpperCase() + meal.slice(1)}
+            {meal === 'snack' ? 'Snack' : meal.charAt(0).toUpperCase() + meal.slice(1)}
           </Text>
           <View style={styles.mealSettingOptions}>
             <TouchableOpacity
               style={[
                 styles.mealSettingOption,
-                mealSettings[meal as keyof typeof mealSettings] === 'home' && styles.mealSettingOptionActive
+                mealSettings[meal as keyof typeof mealSettings] === 'home' &&
+                  styles.mealSettingOptionActive
               ]}
               onPress={() =>
                 setMealSettings((prev) => ({
@@ -556,11 +611,11 @@ Only return this format:
             >
               <Text style={styles.mealSettingOptionText}>Home</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={[
                 styles.mealSettingOption,
-                mealSettings[meal as keyof typeof mealSettings] === 'restaurant' && styles.mealSettingOptionActive
+                mealSettings[meal as keyof typeof mealSettings] === 'restaurant' &&
+                  styles.mealSettingOptionActive
               ]}
               onPress={() =>
                 setMealSettings((prev) => ({
@@ -577,7 +632,6 @@ Only return this format:
     </View>
   );
 
-  // 2) Dietary Preferences
   const renderDietaryPreferences = () => (
     <View style={[styles.section, isDark && styles.sectionDark]}>
       <View style={styles.sectionHeader}>
@@ -633,7 +687,7 @@ Only return this format:
             Alert.alert('Saved', 'Dietary preferences updated.');
           } catch (err) {
             console.error('Error saving dietary preferences', err);
-            Alert.alert('Error', 'Failed to save dietary preferences');
+            Alert.alert('Error', 'Failed to save preferences');
           }
         }}
       >
@@ -643,11 +697,12 @@ Only return this format:
     </View>
   );
 
-  // 3) Calorie Budget
   const renderCalorieBudget = () => (
     <View style={[styles.section, isDark && styles.sectionDark]}>
       <View style={styles.sectionHeader}>
-        <Text style={[styles.sectionTitle, isDark && styles.textLight]}>Today's Calorie Budget</Text>
+        <Text style={[styles.sectionTitle, isDark && styles.textLight]}>
+          Today's Calorie Budget
+        </Text>
       </View>
       <View style={[styles.calorieBudgetInfo, isDark && styles.calorieBudgetInfoDark]}>
         <View style={styles.budgetItem}>
@@ -672,7 +727,7 @@ Only return this format:
     </View>
   );
 
-  // 4) Meal Slots
+  // Updated: Render meal slots.
   const renderMealSlots = () => (
     <View style={styles.slotsContainer}>
       <View style={styles.sectionHeader}>
@@ -682,7 +737,6 @@ Only return this format:
         </Text>
       </View>
       {slots.length === 0 ? (
-        // No plan yet => show large button
         <View style={[styles.emptySlots, isDark && styles.emptySlotsDark]}>
           <Calendar size={32} color={isDark ? '#aaa' : '#ccc'} />
           <Text style={[styles.emptySlotsText, isDark && styles.textLight]}>
@@ -702,83 +756,84 @@ Only return this format:
           )}
         </View>
       ) : (
-        // Show each slot
         slots.map((slot) => (
-          <View key={slot.id} style={styles.mealSlotContainer}>
-            {/* 
-               We pass handleQuickLog so that the Quick Log button works.
-               We also pass an "onSwap" or "swap" function, but we have a custom handleSwapMeal 
-               so we can show a per-slot spinner.
-            */}
-            <MealPlanCard
-              slot={slot}
-              onTimeChange={(time: string) => {
-                setSlots((curr) => curr.map((s) => (s.id === slot.id ? { ...s, time } : s)));
-              }}
-              onToggleLocation={(id: string) => {
-                setSlots((curr) =>
-                  curr.map((s) =>
-                    s.id === id
-                      ? {
-                          ...s,
-                          locationType: s.locationType === 'home' ? 'restaurant' : 'home',
-                          menuItem: null,
-                          reason: ''
-                        }
-                      : s
-                  )
-                );
-              }}
-              onSwap={(id: string) => {
-                // We'll reuse the swapReasons
-                handleSwapMeal(id, swapReasons[id] || '');
-              }}
-              onToggleNotify={(id: string, notify: boolean) => {
-                setSlots((curr) => curr.map((s) => (s.id === id ? { ...s, notify } : s)));
-              }}
-              onQuickLog={(id: string) => handleQuickLog(id)}
-            />
-            {/* If we are regenerating this particular slot, show a spinner instead of swap UI */}
-            {swappingMeal === slot.id ? (
-              <View style={styles.swappingContainer}>
-                <ActivityIndicator size="small" color="#2ecc71" />
-                <Text style={[styles.swappingText, isDark && styles.textLight]}>
-                  Regenerating {slot.name}...
-                </Text>
-              </View>
-            ) : (
+          <View key={slot.id} style={[styles.mealSlotContainer, isDark && styles.sectionDark]}>
+            {slot.menuItem ? (
               <>
-                <View style={styles.reasonContainer}>
-                  <Text style={[styles.reasonLabel, isDark && styles.textLight]}>Reason:</Text>
-                  <Text style={[styles.reasonText, isDark && styles.textLight]}>
-                    {slot.reason}
-                  </Text>
-                </View>
-                <View style={styles.swapContainer}>
-                  <TextInput
-                    style={[styles.swapInput, isDark && styles.swapInputDark]}
-                    placeholder={`Reason to re-gen ${slot.name}...`}
-                    placeholderTextColor={isDark ? '#aaa' : '#666'}
-                    value={swapReasons[slot.id] || ''}
-                    onChangeText={(text) =>
-                      setSwapReasons((prev) => ({ ...prev, [slot.id]: text }))
-                    }
-                  />
-                  <TouchableOpacity
-                    style={styles.swapButton}
-                    onPress={() => handleSwapMeal(slot.id, swapReasons[slot.id] || '')}
-                  >
-                    <LayoutGrid size={18} color="#fff" />
-                    <Text style={styles.swapButtonText}>Re-Gen Meal</Text>
-                  </TouchableOpacity>
-                </View>
+                <MealPlanCard
+                  slot={slot}
+                  onTimeChange={(slotId: string, time: string) => {
+                    setSlots((curr) =>
+                      curr.map((s) => (s.id === slotId ? { ...s, time } : s))
+                    );
+                    setIsPlanSaved(false);
+                  }}
+                  onToggleLocation={(slotId: string) => {
+                    setSlots((curr) =>
+                      curr.map((s) =>
+                        s.id === slotId
+                          ? {
+                              ...s,
+                              locationType: s.locationType === 'home' ? 'restaurant' : 'home',
+                              menuItem: null,
+                              reason: ''
+                            }
+                          : s
+                      )
+                    );
+                    setIsPlanSaved(false);
+                  }}
+                  onSwap={(slotId: string) => {
+                    handleSwapMeal(slotId, swapReasons[slot.id] || '');
+                  }}
+                  onToggleNotify={(slotId: string, notify: boolean) => {
+                    setSlots((curr) => curr.map((s) => (s.id === slotId ? { ...s, notify } : s)));
+                  }}
+                />
+                {swappingMeal === slot.id ? (
+                  <View style={styles.swappingContainer}>
+                    <ActivityIndicator size="small" color="#2ecc71" />
+                    <Text style={[styles.swappingText, isDark && styles.textLight]}>
+                      Regenerating {slot.name}...
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.reasonContainer}>
+                      <Text style={[styles.reasonLabel, isDark && styles.textLight]}>Reason:</Text>
+                      <Text style={[styles.reasonText, isDark && styles.textLight]}>{slot.reason}</Text>
+                    </View>
+                    <View style={styles.swapContainer}>
+                      <TextInput
+                        style={[styles.swapInput, isDark && styles.swapInputDark]}
+                        placeholder={`Reason to re-gen ${slot.name}...`}
+                        placeholderTextColor={isDark ? '#aaa' : '#666'}
+                        value={swapReasons[slot.id] || ''}
+                        onChangeText={(txt) =>
+                          setSwapReasons((prev) => ({ ...prev, [slot.id]: txt }))
+                        }
+                      />
+                      <TouchableOpacity
+                        style={styles.swapButton}
+                        onPress={() => handleSwapMeal(slot.id, swapReasons[slot.id] || '')}
+                      >
+                        <LayoutGrid size={18} color="#fff" />
+                        <Text style={styles.swapButtonText}>Re-Gen Meal</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
               </>
+            ) : (
+              <View style={styles.completedContainer}>
+                <Check size={16} color="#2ecc71" />
+                <Text style={[styles.completedText, isDark && styles.textLight]}>Meal Completed</Text>
+              </View>
             )}
           </View>
         ))
       )}
 
-      {/* If we have some slots, show the “Regenerate Plan” & “Save Plan” actions */}
       {slots.length > 0 && !isGenerating && (
         <View style={styles.actionsContainer}>
           <TouchableOpacity
@@ -791,7 +846,6 @@ Only return this format:
           <TouchableOpacity
             style={[styles.saveButton, isPlanSaved && styles.savedButton]}
             onPress={handleSavePlan}
-            disabled={isPlanSaved}
           >
             <FileCheck size={20} color="#fff" />
             <Text style={styles.saveButtonText}>
@@ -800,6 +854,7 @@ Only return this format:
           </TouchableOpacity>
         </View>
       )}
+
       {isGenerating && (
         <View style={styles.generatingContainer}>
           <ActivityIndicator size="large" color="#2ecc71" />
@@ -817,11 +872,8 @@ Only return this format:
     </View>
   );
 
-  // 5) Conditional Plan Feedback at the bottom
   const renderPlanFeedback = () => {
-    // Only show if there's a plan
     if (slots.length === 0) return null;
-
     return (
       <View style={[styles.section, isDark && styles.sectionDark]}>
         <Text style={[styles.sectionTitle, isDark && styles.textLight]}>Plan Feedback</Text>
@@ -831,17 +883,20 @@ Only return this format:
           placeholderTextColor={isDark ? '#aaa' : '#666'}
           value={planFeedback}
           onChangeText={setPlanFeedback}
+          multiline
         />
       </View>
     );
   };
 
-  // ---------------------------------------------------------------------
-  // Main render
-  // ---------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////
+  // Main Render
+  //////////////////////////////////////////////////////////////////////
   return (
-    <View style={[styles.container, isDark && styles.containerDark]}>
-      {/* Header Bar */}
+    <KeyboardAvoidingView
+      style={[styles.container, isDark && styles.containerDark]}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
       <View style={[styles.header, isDark && styles.headerDark]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <ArrowLeft size={24} color="#2ecc71" />
@@ -863,20 +918,15 @@ Only return this format:
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* 1) Pre-generation meal location settings */}
           {slots.length === 0 && renderMealSettings()}
-          {/* 2) Dietary preferences */}
           {renderDietaryPreferences()}
-          {/* 3) Calorie budget */}
           {renderCalorieBudget()}
-          {/* 4) Meal slots (or empty plan) */}
           {renderMealSlots()}
-          {/* 5) Feedback at the bottom (only if we have a plan) */}
           {renderPlanFeedback()}
           <View style={styles.bottomSpacer} />
         </ScrollView>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -913,7 +963,6 @@ const styles = StyleSheet.create({
   loadingContainerDark: { backgroundColor: '#121212' },
   loadingText: { marginTop: 16, color: '#666', fontSize: 16 },
 
-  // Section containers
   section: {
     backgroundColor: 'white',
     borderRadius: 12,
@@ -931,7 +980,6 @@ const styles = StyleSheet.create({
   sectionSubtitle: { fontSize: 14, color: '#666' },
   subtitleDark: { color: '#aaa' },
 
-  // Meal Settings UI
   mealSettingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -947,15 +995,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginRight: 8,
   },
-  mealSettingOptionActive: {
-    backgroundColor: '#2ecc71'
-  },
-  mealSettingOptionText: {
-    fontSize: 14,
-    color: '#333',
-  },
+  mealSettingOptionActive: { backgroundColor: '#2ecc71' },
+  mealSettingOptionText: { fontSize: 14, color: '#333' },
 
-  // Preferences
   preferencesContainer: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 },
   preferenceOption: {
     flexDirection: 'row',
@@ -967,7 +1009,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#eee',
+    borderColor: '#eee'
   },
   preferenceOptionDark: { backgroundColor: '#252525', borderColor: '#333' },
   activePreference: { backgroundColor: '#2ecc71', borderColor: '#2ecc71' },
@@ -977,17 +1019,17 @@ const styles = StyleSheet.create({
   preferenceTextDark: { color: '#aaa' },
   activePreferenceText: { color: 'white', fontWeight: 'bold' },
   activePreferenceTextDark: { color: 'white', fontWeight: 'bold' },
+
   updateButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#2ecc71',
     borderRadius: 8,
-    paddingVertical: 12,
+    paddingVertical: 12
   },
   updateButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16, marginLeft: 8 },
 
-  // Calorie Budget
   calorieBudgetInfo: { flexDirection: 'row', borderRadius: 8, padding: 16 },
   calorieBudgetInfoDark: { backgroundColor: '#252525' },
   budgetItem: { flex: 1, alignItems: 'center' },
@@ -997,7 +1039,6 @@ const styles = StyleSheet.create({
   budgetLabelDark: { color: '#aaa' },
   divider: { width: 1, backgroundColor: '#eee', marginHorizontal: 8 },
 
-  // Slots
   slotsContainer: { marginBottom: 16 },
   emptySlots: {
     backgroundColor: 'white',
@@ -1007,7 +1048,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#f0f0f0',
-    borderStyle: 'dashed',
+    borderStyle: 'dashed'
   },
   emptySlotsDark: { backgroundColor: '#1e1e1e', borderColor: '#333' },
   emptySlotsText: {
@@ -1015,77 +1056,31 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#666',
     marginTop: 12,
-    marginBottom: 8,
+    marginBottom: 8
   },
   emptySlotsSubtext: { fontSize: 14, color: '#888', textAlign: 'center' },
   emptySlotsSubtextDark: { color: '#777' },
 
-  // Action buttons
-  actionsContainer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 },
-  generateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#3498db',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-  },
-  generateButtonLarge: {
-    paddingVertical: 14, // bigger vertical padding
-  },
-  generateButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16, marginLeft: 8 },
-  saveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2ecc71',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-  },
-  savedButton: { backgroundColor: '#27ae60' },
-  saveButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16, marginLeft: 8 },
-
-  // Generation states
-  generatingContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 24 },
-  generatingText: { marginTop: 12, fontSize: 16, color: '#666' },
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff0f0',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 12,
-  },
-  errorText: { color: '#ff6b6b', marginLeft: 8, fontSize: 14 },
-
-  // Plan feedback near bottom
-  feedbackInput: {
-    borderColor: '#ccc',
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginTop: 8,
-    color: '#333',
-  },
-  feedbackInputDark: { borderColor: '#555', color: '#f2f2f2' },
-
-  // Slot container
   mealSlotContainer: {
     marginBottom: 16,
     backgroundColor: 'white',
     borderRadius: 12,
-    padding: 12,
+    padding: 12
   },
 
-  // Reason
+  // Style for completed (logged) meal view.
+  completedContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    justifyContent: 'center'
+  },
+  completedText: { fontSize: 16, fontWeight: 'bold', color: '#2ecc71', marginLeft: 6 },
+
   reasonContainer: { marginTop: 8 },
   reasonLabel: { fontSize: 14, fontWeight: 'bold' },
   reasonText: { fontSize: 14, marginTop: 4 },
 
-  // Swap
   swapContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
   swapInput: {
     flex: 1,
@@ -1093,7 +1088,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingVertical: 6
   },
   swapInputDark: { borderColor: '#555', color: '#f2f2f2' },
   swapButton: {
@@ -1103,15 +1098,69 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginLeft: 8,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'center'
   },
   swapButtonText: { color: 'white', fontWeight: 'bold', marginLeft: 6 },
 
-  // Swapping spinner
   swappingContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
   swappingText: { marginLeft: 8, fontSize: 14, color: '#666' },
 
-  bottomSpacer: { height: 80 },
+  actionsContainer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 },
+  generateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#3498db',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 10
+  },
+  generateButtonLarge: { paddingVertical: 14 },
+  generateButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16, marginLeft: 8 },
+
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2ecc71',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 10
+  },
+  savedButton: { backgroundColor: '#27ae60' },
+  saveButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16, marginLeft: 8 },
+
+  generatingContainer: { marginTop: 16, alignItems: 'center', justifyContent: 'center' },
+  generatingText: { marginTop: 8, fontSize: 16, color: '#333' },
+
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    borderRadius: 8,
+    padding: 8,
+    backgroundColor: '#ffe6e6'
+  },
+  errorText: { marginLeft: 8, color: '#ff6b6b' },
+
+  feedbackInput: {
+    minHeight: 60,
+    borderColor: '#ccc',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 8,
+    textAlignVertical: 'top',
+    backgroundColor: '#fff'
+  },
+  feedbackInputDark: {
+    backgroundColor: '#252525',
+    borderColor: '#555',
+    color: '#f2f2f2'
+  },
+
+  bottomSpacer: { height: 80 }
 });
 
 export default PlanMyDayScreen;

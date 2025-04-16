@@ -1,9 +1,9 @@
 // Restaurant Details Screen (app/(app)/restaurant-details.tsx)
 import React, { useEffect, useState, useContext } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert, Platform, Image, ScrollView } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
-import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { ArrowLeft, Heart, Plus, MapPin, ArrowUpRight, Search, X } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
 
@@ -396,7 +396,7 @@ const RestaurantDetailsScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
       
-      <View style={[styles.content, isDark && styles.contentDark]}>
+      <ScrollView style={[styles.content, isDark && styles.contentDark]} contentContainerStyle={{ paddingBottom: 90 }}>
         <View style={styles.restaurantDetails}>
           <Text style={[styles.address, isDark && styles.addressDark]}>{address}</Text>
           
@@ -501,7 +501,7 @@ const RestaurantDetailsScreen: React.FC = () => {
             </>
           )}
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 };
@@ -557,7 +557,7 @@ const styles = StyleSheet.create({
   },
   restaurantDetails: {
     padding: 16,
-    paddingBottom: 90, // Add extra padding for tab bar
+    paddingBottom: 90, // Additional padding for the tab bar
   },
   address: {
     fontSize: 16,

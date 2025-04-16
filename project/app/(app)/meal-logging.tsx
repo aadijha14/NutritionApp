@@ -1,10 +1,12 @@
 // Meal Logging Screen (app/(app)/meal-logging.tsx)
-import React, { useState, useEffect, useContext } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Switch, Platform } from 'react-native';
+import React, { useState, useEffect, useContext, useRef } from 'react';
+import { 
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Switch, Platform, Modal, Animated 
+} from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { ArrowLeft, Save, Calendar } from 'lucide-react-native';
+import { ArrowLeft, Save, Calendar, Check } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
 
 // For web platform compatibility, provide a DateTimePicker alternative
@@ -61,6 +63,11 @@ const MealLoggingScreen: React.FC = () => {
   const [fetchingNutrition, setFetchingNutrition] = useState(false);
   const [mealType, setMealType] = useState(params.mealType as string || '');
   
+  // State for success modal
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const checkScale = useRef(new Animated.Value(0)).current;
+  const modalOpacity = useRef(new Animated.Value(0)).current;
+  
   const restaurantId = params.restaurantId as string;
   const restaurantName = params.restaurantName as string;
   const restaurantLat = params.latitude ? parseFloat(params.latitude as string) : null;
@@ -99,8 +106,8 @@ const MealLoggingScreen: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-app-id': 'a712f1f5',
-          'x-app-key': '93d5ae72f7914659738752a846c039ab',
+          'x-app-id': 'a712f1f5',  // hardcoded API keys
+          'x-app-key': '93d5ae72f7914659738752a846c039ab',  // hardcoded API keys
         },
         body: JSON.stringify({ query }),
       });
@@ -201,12 +208,40 @@ const MealLoggingScreen: React.FC = () => {
         location: locationData,
         mealType: mealType || null
       });
+
+      // Show success modal with improved animations
+      setShowSuccessModal(true);
       
-      Alert.alert(
-        'Success',
-        'Meal logged successfully',
-        [{ text: 'OK', onPress: () => router.push('/(app)/dashboard') }]
-      );
+      // Start the animations
+      Animated.sequence([
+        // Fade in the modal overlay
+        Animated.timing(modalOpacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        // Pop and bounce effect for the check icon
+        Animated.spring(checkScale, {
+          toValue: 1,
+          friction: 5,
+          tension: 40,
+          useNativeDriver: true,
+        })
+      ]).start();
+      
+      // Keep the modal visible for a bit then navigate away
+      setTimeout(() => {
+        // Fade out animation before hiding
+        Animated.timing(modalOpacity, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }).start(() => {
+          setShowSuccessModal(false);
+          router.push('/(app)/dashboard');
+        });
+      }, 1500);
+      
     } catch (error) {
       console.error('Error logging meal:', error);
       Alert.alert('Error', 'Failed to log meal. Please try again.');
@@ -239,52 +274,76 @@ const MealLoggingScreen: React.FC = () => {
       <Text style={[styles.label, isDark && styles.labelDark]}>Meal Type</Text>
       <View style={styles.mealTypeContainer}>
         <TouchableOpacity 
-          style={[styles.mealTypeButton, mealType === 'breakfast' && styles.mealTypeButtonSelected, isDark && styles.mealTypeButtonDark]}
+          style={[
+            styles.mealTypeButton, 
+            isDark && styles.mealTypeButtonDark,
+            mealType === 'breakfast' && styles.mealTypeButtonSelected,
+            mealType === 'breakfast' && isDark && styles.mealTypeButtonSelectedDark
+          ]}
           onPress={() => setMealType('breakfast')}
         >
           <Text style={[
             styles.mealTypeButtonText, 
+            isDark && styles.mealTypeButtonTextDark,
             mealType === 'breakfast' && styles.mealTypeButtonTextSelected,
-            isDark && styles.mealTypeButtonTextDark
+            mealType === 'breakfast' && isDark && styles.mealTypeButtonTextSelected
           ]}>
             Breakfast
           </Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={[styles.mealTypeButton, mealType === 'lunch' && styles.mealTypeButtonSelected, isDark && styles.mealTypeButtonDark]}
+          style={[
+            styles.mealTypeButton,
+            isDark && styles.mealTypeButtonDark,
+            mealType === 'lunch' && styles.mealTypeButtonSelected,
+            mealType === 'lunch' && isDark && styles.mealTypeButtonSelectedDark
+          ]}
           onPress={() => setMealType('lunch')}
         >
           <Text style={[
-            styles.mealTypeButtonText, 
+            styles.mealTypeButtonText,
+            isDark && styles.mealTypeButtonTextDark,
             mealType === 'lunch' && styles.mealTypeButtonTextSelected,
-            isDark && styles.mealTypeButtonTextDark
+            mealType === 'lunch' && isDark && styles.mealTypeButtonTextSelected
           ]}>
             Lunch
           </Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={[styles.mealTypeButton, mealType === 'dinner' && styles.mealTypeButtonSelected, isDark && styles.mealTypeButtonDark]}
+          style={[
+            styles.mealTypeButton,
+            isDark && styles.mealTypeButtonDark,
+            mealType === 'dinner' && styles.mealTypeButtonSelected,
+            mealType === 'dinner' && isDark && styles.mealTypeButtonSelectedDark
+          ]}
           onPress={() => setMealType('dinner')}
         >
           <Text style={[
-            styles.mealTypeButtonText, 
+            styles.mealTypeButtonText,
+            isDark && styles.mealTypeButtonTextDark,
             mealType === 'dinner' && styles.mealTypeButtonTextSelected,
-            isDark && styles.mealTypeButtonTextDark
+            mealType === 'dinner' && isDark && styles.mealTypeButtonTextSelected
           ]}>
             Dinner
           </Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={[styles.mealTypeButton, mealType === 'snack' && styles.mealTypeButtonSelected, isDark && styles.mealTypeButtonDark]}
+          style={[
+            styles.mealTypeButton,
+            isDark && styles.mealTypeButtonDark,
+            mealType === 'snack' && styles.mealTypeButtonSelected,
+            mealType === 'snack' && isDark && styles.mealTypeButtonSelectedDark
+          ]}
           onPress={() => setMealType('snack')}
         >
           <Text style={[
-            styles.mealTypeButtonText, 
+            styles.mealTypeButtonText,
+            isDark && styles.mealTypeButtonTextDark,
             mealType === 'snack' && styles.mealTypeButtonTextSelected,
-            isDark && styles.mealTypeButtonTextDark
+            mealType === 'snack' && isDark && styles.mealTypeButtonTextSelected
           ]}>
             Snack
           </Text>
@@ -480,6 +539,26 @@ const MealLoggingScreen: React.FC = () => {
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Success Modal */}
+      <Modal
+        visible={showSuccessModal}
+        transparent
+        animationType="none"
+      >
+        <Animated.View style={[styles.modalOverlay, { opacity: modalOpacity }]}>
+          <Animated.View 
+            style={[
+              styles.modalContainer, 
+              isDark && styles.modalContainerDark,
+              { transform: [{ scale: checkScale }] }
+            ]}
+          >
+            <Check size={80} color="#2ecc71" />
+            <Text style={[styles.successText, isDark && styles.successTextDark]}>Meal Logged!</Text>
+          </Animated.View>
+        </Animated.View>
+      </Modal>
     </View>
   );
 };
@@ -742,6 +821,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#2ecc71',
     borderColor: '#2ecc71',
   },
+  mealTypeButtonSelectedDark: {
+    backgroundColor: '#2ecc71',
+    borderColor: '#2ecc71',
+  },
   mealTypeButtonText: {
     color: '#666',
     fontWeight: '500',
@@ -752,6 +835,39 @@ const styles = StyleSheet.create({
   mealTypeButtonTextSelected: {
     color: 'white',
     fontWeight: 'bold',
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: 160,
+    height: 160,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  modalContainerDark: {
+    backgroundColor: '#1e1e1e',
+    shadowColor: '#000',
+  },
+  successText: {
+    marginTop: 12,
+    fontSize: 18,
+    color: '#333',
+    fontWeight: 'bold',
+  },
+  successTextDark: {
+    color: '#f2f2f2',
   },
 });
 

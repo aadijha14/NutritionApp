@@ -251,7 +251,7 @@ const SettingsScreen: React.FC = () => {
   };
 
   const handleDarkModeToggle = (value: boolean) => {
-    setSettings({...settings, darkMode: value});
+    setSettings({ ...settings, darkMode: value });
     toggleTheme();
   };
 
@@ -273,7 +273,7 @@ const SettingsScreen: React.FC = () => {
       
       Alert.alert(
         'Confirm Changes',
-        `Based on your updated information:\n\nYour TDEE: ${newTDEE} calories\nYour daily target: ${newDailyTarget} calories\n\nSave these changes?`,
+        `Based on your updated information:\n\nYour Daily Target: ${newDailyTarget} calories\n\nSave these changes?`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Save', onPress: handleSaveSettings }
@@ -296,7 +296,7 @@ const SettingsScreen: React.FC = () => {
         <TextInput
           style={[styles.input, isDark && styles.inputDark]}
           value={settings.name || ''}
-          onChangeText={(text) => setSettings({...settings, name: text})}
+          onChangeText={(text) => setSettings({ ...settings, name: text })}
           placeholder="Enter your name"
           placeholderTextColor={isDark ? "#777" : undefined}
         />
@@ -358,7 +358,7 @@ const SettingsScreen: React.FC = () => {
           onChangeText={(text) => {
             const weight = parseFloat(text);
             if (!isNaN(weight) || text === '') {
-              setSettings({...settings, weight: text === '' ? undefined : weight});
+              setSettings({ ...settings, weight: text === '' ? undefined : weight });
             }
           }}
           placeholder="Enter your weight"
@@ -378,7 +378,7 @@ const SettingsScreen: React.FC = () => {
           onChangeText={(text) => {
             const height = parseFloat(text);
             if (!isNaN(height) || text === '') {
-              setSettings({...settings, height: text === '' ? undefined : height});
+              setSettings({ ...settings, height: text === '' ? undefined : height });
             }
           }}
           placeholder="Enter your height"
@@ -398,7 +398,7 @@ const SettingsScreen: React.FC = () => {
           onChangeText={(text) => {
             const age = parseInt(text);
             if (!isNaN(age) || text === '') {
-              setSettings({...settings, age: text === '' ? undefined : age});
+              setSettings({ ...settings, age: text === '' ? undefined : age });
             }
           }}
           placeholder="Enter your age"
@@ -420,7 +420,7 @@ const SettingsScreen: React.FC = () => {
               isDark && styles.radioButtonDark,
               settings.sex === 'male' && isDark && styles.radioButtonDarkSelected
             ]}
-            onPress={() => setSettings({...settings, sex: 'male'})}
+            onPress={() => setSettings({ ...settings, sex: 'male' })}
           >
             <Text style={[
               styles.radioText, 
@@ -436,7 +436,7 @@ const SettingsScreen: React.FC = () => {
               isDark && styles.radioButtonDark,
               settings.sex === 'female' && isDark && styles.radioButtonDarkSelected
             ]}
-            onPress={() => setSettings({...settings, sex: 'female'})}
+            onPress={() => setSettings({ ...settings, sex: 'female' })}
           >
             <Text style={[
               styles.radioText, 
@@ -463,7 +463,7 @@ const SettingsScreen: React.FC = () => {
                 isDark && styles.activityLevelButtonDark,
                 settings.activityLevel === level.value && isDark && styles.activityLevelDarkSelected
               ]}
-              onPress={() => setSettings({...settings, activityLevel: level.value})}
+              onPress={() => setSettings({ ...settings, activityLevel: level.value })}
             >
               <View style={styles.activityLevelHeader}>
                 <Text style={[
@@ -530,7 +530,7 @@ const SettingsScreen: React.FC = () => {
                 isDark && styles.goalTypeButtonDark,
                 settings.goalType === goal.value && isDark && styles.goalTypeDarkSelected
               ]}
-              onPress={() => setSettings({...settings, goalType: goal.value as any})}
+              onPress={() => setSettings({ ...settings, goalType: goal.value as any })}
             >
               <Text style={[
                 styles.goalTypeLabel,
@@ -553,15 +553,11 @@ const SettingsScreen: React.FC = () => {
       <View style={[styles.infoCard, isDark && styles.infoCardDark]}>
         <Text style={[styles.infoTitle, isDark && styles.infoTitleDark]}>Current Nutritional Information</Text>
         <View style={styles.infoRow}>
-          <Text style={[styles.infoLabel, isDark && styles.textLight]}>TDEE (Total Daily Energy Expenditure):</Text>
-          <Text style={[styles.infoValue, isDark && styles.infoValueDark]}>{settings.tdee || '—'} cal</Text>
-        </View>
-        <View style={styles.infoRow}>
           <Text style={[styles.infoLabel, isDark && styles.textLight]}>Daily Target:</Text>
           <Text style={[styles.infoValue, isDark && styles.infoValueDark]}>{settings.dailyCalorieTarget || '—'} cal</Text>
         </View>
         <Text style={[styles.infoNote, isDark && styles.infoNoteDark]}>
-          Update your biometric information to recalculate these values.
+          Update your biometric information to recalculate this value.
         </Text>
       </View>
     </View>
@@ -570,34 +566,6 @@ const SettingsScreen: React.FC = () => {
   const renderAppSection = () => (
     <View style={[styles.section, isDark && styles.sectionDark]}>
       <Text style={[styles.sectionTitle, isDark && styles.textLight]}>App Settings</Text>
-      
-      <View style={styles.settingRow}>
-        <View style={styles.settingInfo}>
-          <Bell size={18} color={isDark ? "#aaa" : "#666"} />
-          <Text style={[styles.settingLabel, isDark && styles.textLight]}>Notifications</Text>
-        </View>
-        <Switch
-          value={settings.notifications || false}
-          onValueChange={(value) => setSettings({...settings, notifications: value})}
-          trackColor={{ false: isDark ? '#555' : '#ddd', true: '#2ecc7199' }}
-          thumbColor={settings.notifications ? '#2ecc71' : isDark ? '#888' : '#f4f3f4'}
-          ios_backgroundColor={isDark ? '#555' : '#ddd'}
-        />
-      </View>
-      
-      <View style={styles.settingRow}>
-        <View style={styles.settingInfo}>
-          <AtSign size={18} color={isDark ? "#aaa" : "#666"} />
-          <Text style={[styles.settingLabel, isDark && styles.textLight]}>Meal Reminders</Text>
-        </View>
-        <Switch
-          value={settings.mealReminders || false}
-          onValueChange={(value) => setSettings({...settings, mealReminders: value})}
-          trackColor={{ false: isDark ? '#555' : '#ddd', true: '#2ecc7199' }}
-          thumbColor={settings.mealReminders ? '#2ecc71' : isDark ? '#888' : '#f4f3f4'}
-          ios_backgroundColor={isDark ? '#555' : '#ddd'}
-        />
-      </View>
       
       <View style={styles.settingRow}>
         <View style={styles.settingInfo}>
@@ -657,7 +625,7 @@ const SettingsScreen: React.FC = () => {
 
       <ScrollView 
         style={styles.scrollView}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 90 }]} // Extra padding for tab bar
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 90 }]}
       >
         {error && (
           <View style={[styles.errorContainer, isDark && styles.errorContainerDark]}>

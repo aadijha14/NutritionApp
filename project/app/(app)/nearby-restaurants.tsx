@@ -1,6 +1,17 @@
 // NearbyRestaurantsScreen (app/(app)/nearby-restaurants.tsx)
 import React, { useEffect, useState, useRef, useContext } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert, Platform, Linking } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TextInput, 
+  TouchableOpacity, 
+  ActivityIndicator, 
+  Alert, 
+  Platform, 
+  Linking, 
+  ScrollView 
+} from 'react-native';
 import { router } from 'expo-router';
 import * as Location from 'expo-location';
 import { auth, db } from '../../firebaseConfig';
@@ -444,42 +455,44 @@ const NearbyRestaurantsScreen: React.FC = () => {
     });
   };
 
-  const renderRestaurantItem = ({ item }: { item: Restaurant }) => (
+  const renderRestaurantItem = (restaurant: Restaurant) => (
     <TouchableOpacity 
+      key={restaurant.place_id}
       style={[styles.restaurantItem, isDark && styles.restaurantItemDark]}
-      onPress={() => handleSelectRestaurant(item)}
+      onPress={() => handleSelectRestaurant(restaurant)}
     >
       <View style={styles.restaurantInfo}>
-        <Text style={[styles.restaurantName, isDark && styles.textLight]}>{item.name}</Text>
-        <Text style={[styles.restaurantAddress, isDark && styles.restaurantAddressDark]}>{item.vicinity}</Text>
-        {item.rating && (
+        <Text style={[styles.restaurantName, isDark && styles.textLight]}>{restaurant.name}</Text>
+        <Text style={[styles.restaurantAddress, isDark && styles.restaurantAddressDark]}>{restaurant.vicinity}</Text>
+        {restaurant.rating && (
           <View style={styles.ratingContainer}>
             <Star size={16} color="#FFD700" fill="#FFD700" />
-            <Text style={[styles.ratingText, isDark && styles.ratingTextDark]}>{item.rating}</Text>
+            <Text style={[styles.ratingText, isDark && styles.ratingTextDark]}>{restaurant.rating}</Text>
           </View>
         )}
       </View>
       <View style={styles.restaurantActions}>
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => focusOnRestaurant(item)}
+          onPress={() => focusOnRestaurant(restaurant)}
         >
           <MapPin size={20} color="#2ecc71" />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => toggleFavorite(item)}
+          onPress={() => toggleFavorite(restaurant)}
         >
           <Heart 
             size={20} 
             color="#FF6B6B" 
-            fill={item.isFavorite ? "#FF6B6B" : "transparent"} 
+            fill={restaurant.isFavorite ? "#FF6B6B" : "transparent"} 
           />
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
 
+  // Render the content that updates based on loading, errors, etc.
   const renderContent = () => {
     if (loading) {
       return (
@@ -544,22 +557,21 @@ const NearbyRestaurantsScreen: React.FC = () => {
       );
     }
     
+    // Render list of restaurant items if available
     return (
-      <FlatList
-        data={filteredRestaurants}
-        renderItem={renderRestaurantItem}
-        keyExtractor={(item) => item.place_id}
-        contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
+      <View style={styles.listContainer}>
+        {filteredRestaurants.length > 0 ? (
+          filteredRestaurants.map((restaurant) => renderRestaurantItem(restaurant))
+        ) : (
           <View style={[styles.emptyContainer, isDark && styles.emptyContainerDark]}>
             <Text style={[styles.emptyText, isDark && styles.textLight]}>No restaurants found</Text>
           </View>
-        }
-      />
+        )}
+      </View>
     );
   };
 
+  // Render map component
   const renderMap = () => {
     if (Platform.OS === 'web') {
       return (
@@ -609,7 +621,7 @@ const NearbyRestaurantsScreen: React.FC = () => {
   };
 
   return (
-    <View style={[styles.container, isDark && styles.containerDark]}>
+    <ScrollView contentContainerStyle={[styles.container, isDark && styles.containerDark]}>
       <View style={[styles.header, isDark && styles.headerDark]}>
         <TouchableOpacity 
           style={styles.backButton}
@@ -657,14 +669,14 @@ const NearbyRestaurantsScreen: React.FC = () => {
         </Text>
         {renderContent()}
       </View>
-    </View>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     backgroundColor: '#f9f9f9',
+    paddingBottom: 16,
   },
   containerDark: {
     backgroundColor: '#121212',
@@ -794,7 +806,6 @@ const styles = StyleSheet.create({
     color: '#999',
   },
   resultsContainer: {
-    flex: 1,
     paddingHorizontal: 16,
   },
   resultsTitle: {
@@ -807,9 +818,9 @@ const styles = StyleSheet.create({
     color: '#aaa',
   },
   loadingContainer: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: 32,
   },
   loadingContainerDark: {
     backgroundColor: '#121212',
@@ -820,10 +831,10 @@ const styles = StyleSheet.create({
     color: '#555',
   },
   errorContainer: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 16,
+    paddingVertical: 32,
   },
   errorContainerDark: {
     backgroundColor: '#121212',
@@ -848,6 +859,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 8,
+    marginVertical: 4,
   },
   retryButtonText: {
     color: 'white',
@@ -855,7 +867,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   listContainer: {
-    flexGrow: 1,
     paddingBottom: 16,
   },
   restaurantItem: {
